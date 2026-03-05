@@ -1,0 +1,688 @@
+#' Simple analysis of single-cell data
+#'
+#' Simple analysis of scRNA-seq or CITE-seq data, from quality control to clustering and marker gene detection. 
+#'
+#' @param x A \link[SummarizedExperiment]{SummarizedExperiment} object where each column represents a single cell.
+#' Rows are usually expected to contain genes or antibody-derived tags, see \code{rna.experiment=} and \code{adt.experiment=} for details.
+#' @param rna.experiment Identity of the experiment containing the RNA data, when \code{x} is a \link[SingleCellExperiment]{SingleCellExperiment}.
+#' If \code{TRUE}, the main experiment is assumed to contain the RNA data (see \code{\link[SingleCellExperiment]{mainExpName}}).
+#' If a string is supplied, it is treated as the name of the alteranative experiment (see \code{\link[SingleCellExperiment]{altExps}}) containing the RNA data.
+#' If \code{FALSE} or \code{NULL}, it is assumed that no RNA data is available.
+#' @param adt.experiment Identity of the experiment containing the ADT data, when \code{x} is a \link[SingleCellExperiment]{SingleCellExperiment}.
+#' If \code{TRUE}, the main experiment is assumed to contain the ADT data (see \code{\link[SingleCellExperiment]{mainExpName}}).
+#' If a string is supplied, it is treated as the name of the alteranative experiment (see \code{\link[SingleCellExperiment]{altExps}}) containing the ADT data.
+#' If \code{FALSE} or \code{NULL}, it is assumed that no ADT data is available.
+#' @param subset.factor String specifying the name of the \code{\link[SummarizedExperiment]{colData}(se)} column containing a factor with which to subset the cells.
+#' @param subset.levels Vector containing the subset of levels to retain in the factor specified by \code{subset.factor}.
+#' @param qc.num.mads Integer specifying the number of median absolute deviations (MADs) with which to define a quality control (QC) filtering threshold.
+#' Smaller values increase the stringency of the filter.
+#' @param qc.filter Boolean indicating whether putative low-quality cells should be removed.
+#' If \code{FALSE}, low-quality cells are identified but not removed prior to further cells.
+#' @param num.hvgs Integer specifying the number of highly variable genes (HVGs) to retain for downstream analyses.
+#' More HVGs capture more biological signal at the cost of capturing more technical noise and increasing computational work.
+#' Only relevant if \code{rna.experiment=} indicates that RNA data is available.
+#' @param num.pcs Integer specifying the number of top principal components (PCs) to retain for downstream analyses.
+#' More PCs capture more biological signal at the cost of capturing more technical noise and increasing computational work.
+#' @param cluster.method Character vector specifying the clustering methods to run on the top PCs,
+#' namely graph-based clustering (\code{"graph"}) or k-means clustering (\code{"kmeans"}).
+#' Multiple methods may be specified here to generate multiple clusterings, but only the clusters from the first method are used for marker detection.
+#' @param cluster.kmeans.k Integer specifying the number of clusters to generate from k-means clustering.
+#' Only used if \code{"kmeans"} is in \code{cluster.method}.
+#' @param cluster.graph.method String naming the community detection method to use in graph-based clustering.
+#' These are roughly equivalent to the functions of the same name from the \pkg{igraph} R package.
+#' (Note that \code{"multilevel"} is a synonym for the Louvain method.)
+#' Only used if \code{"graph"} is in \code{cluster.method}.
+#' @param cluster.graph.num.neighbors Integer specifying the number of nearest neighbors to use during construction of the shared-nearest neighbor graph. 
+#' Larger values increase graph connectivity and decrease cluster resolution. 
+#' Only used if \code{"graph"} is in \code{cluster.method}.
+#' @param cluster.graph.resolution Number specifying the resolution to use in the multi-level or Leiden community detection algorithms.
+#' Larger values usually result in a greater number of smaller clusters.
+#' Only used if \code{"graph"} is in \code{cluster.method}.
+#' @param reduced.dimensions Character vector specifying the dimensionality reduction algorithms to use for visualization.
+#' This can be zero, one or both of \code{"tsne"} (for t-SNEs) and \code{"umap"} (for UMAPs).
+#' @param tsne.perplexity Number specifying the perplexity to use in t-SNE.
+#' Larger values increase the size of each cell's neighborhood and focus more on global structure. 
+#' Only used if \code{"tsne"} is in \code{reduced.dimensions}.
+#' @param umap.num.neighbors Integer specifying the number of neighbors to use in the UMAP.
+#' Larger values increase connectivity and focus more on global structure. 
+#' Only used if \code{"umap"} is in \code{reduced.dimensions}.
+#' @param umap.min.dist Number specifying the minimum distance between points in the UMAP.
+#' Larger values favor a more even distribution of cells throughout the low-dimensional space.
+#' Only used if \code{"umap"} is in \code{reduced.dimensions}.
+#' @param marker.effect.size String naming the effect size to use when ranking marker genes.
+#' This should be one of:
+#' \itemize{
+#' \item \code{"cohens.d"}: Cohen's d, i.e., the standardized difference in log-expression.
+#' This is analogous to the t-statistic in a two-group t-test and accounts for the variance within each group.
+#' \item \code{"auc"}: AUC, i.e., the area under the curve.
+#' This is closely related to the U statistic in a Wilcoxon rank sum test, and is a more robust/less sensitive alternative Cohen's d.
+#' \item \code{"delta.mean"}: difference in the mean log-expression.
+#' This is an estimate of the log-fold change.
+#' \item \code{"delta.detected"}: difference in the proportion of cells with detected expression.
+#' Large differences correspond to genes that are silent in one group and activated in another.
+#' }
+#' This is combined with \code{marker.summary} to determine the actual statistic for ranking, see \code{?\link[scrapper]{scoreMarkers}}.
+#' @param marker.summary String specifying the summary statistic to use when ranking marker genes.
+#' This should be one of:
+#' \itemize{
+#' \item \code{"min.rank"}: the minimum rank of each gene across all pairwise comparisons for a particular cluster.
+#' This creates a ranking where the top genes are guaranteed to separate the cluster of interest from every other cluster.
+#' \item \code{"mean"}: the mean effect size of each gene across all pairwise comparisons for a particular cluster.
+#' This creates a ranking where the top genes are upregulated in the cluster of interest against the average of all other clusters.
+#' \item \code{"median"}: the median effect size of each gene across all pairwise comparisons for a particular cluster.
+#' This creates a ranking where the top genes are upregulated in the cluster of interest against most other clusters.
+#' \item \code{"min"}: the minimum effect size of each gene across all pairwise comparisons for a particular cluster.
+#' This creates a ranking where the top genes must be upregulated in the cluster of interest against all other clusters.
+#' }
+#' This is combined with \code{marker.effect} to determine the actual statistic for ranking, see \code{?\link[scrapper]{scoreMarkers}}.
+#' @param marker.lfc.threshold Non-negative number specifying the log-fold change threshold to test against.
+#' Larger values focus on marker genes with larger log-fold changes at the expense of those with smaller variances.
+#' @param assay String or integer specifying the assay in \code{x} containing the count matrix.
+#' For \link[SingleCellExperiment]{SingleCellExperiment} objects, the same assay is used for the main and alternative experiments.
+#' @param num.threads Integer specifying the number of threads to use in the various computations.
+#' @param output.dir String containing the path to an output directory in which to write the Rmarkdown report and save results.
+#' @param metadata Named list of additional fields to add to each result's metadata.
+#' @param author Character vector of authors.
+#' @param dry.run Boolean indicating whether to perform a dry run.
+#' This will write the Rmarkdown report without evaluating it.
+#' @param symbol.field String specifying the name of the \code{\link[SummarizedExperiment]{rowData}} column that contains gene symbols.
+#' This is added to the various gene-based results, e.g., marker detection tables.
+#' If \code{NULL}, no symbols are added.
+#' @param save.results Boolean indicating whether the results should also be saved to file.
+#'
+#' @return 
+#' A Rmarkdown report named \code{report.Rmd} is written inside \code{output.dir} that contains the analysis commands.
+#'
+#' If \code{dry.run=FALSE}, a list is returned containing:
+#' \itemize{
+#' \item \code{sce}, a \link[SingleCellExperiment]{SingleCellExperiment} object with dimensionality reduction and clustering results.
+#' This may have fewer cells than the input \code{x} if \code{qc.filter=TRUE}.
+#' \item \code{qc.rna}, a \link[S4Vectors]{DataFrame} object with RNA-based QC metrics for each cell in the input \code{x}.
+#' Only returned if \code{rna.experiment=} indicates that RNA data is available.
+#' \item \code{qc.adt}, a \link[S4Vectors]{DataFrame} object with ADT-based QC metrics for each cell in the input \code{x}.
+#' Only returned if \code{adt.experiment=} indicates that ADT data is available.
+#' \item \code{markers.rna}, a named list of \link[S4Vectors]{DataFrame} results containing marker gene statistics for each cluster.
+#' Only returned if \code{rna.experiment=} indicates that RNA data is available.
+#' \item \code{markers.adt}, a named list of \link[S4Vectors]{DataFrame} results containing marker tag statistics for each cluster.
+#' Only returned if \code{adt.experiment=} indicates that ADT data is available.
+#' }
+#'
+#' If \code{save.results=TRUE}, the results are saved in a \code{results} directory inside \code{output}.
+#' 
+#' If \code{dry.run=TRUE}, \code{NULL} is returned.
+#' Only the Rmarkdown report is saved to file.
+#'
+#' @author Aaron Lun
+#' 
+#' @examples
+#' # Getting an example dataset from the scRNAseq package.
+#' library(scRNAseq)
+#' se <- ZeiselBrainData()
+#'
+#' # Running the pipeline; omitting the save for speed here.
+#' tmp <- tempfile()
+#' output <- runSolo(se, output=tmp, save.results=FALSE)
+#'
+#' # Checking the outputs.
+#' list.files(tmp, recursive=TRUE)
+#' output$sce
+#' output$markers
+#' 
+#' @export
+#' @import augere.core
+#' @importFrom scrapper analyze.se
+#' @importFrom scater plotXY
+runSolo <- function(
+    x, 
+    rna.experiment = TRUE,
+    adt.experiment = NULL,
+    subset.factor = NULL, 
+    subset.levels = NULL,
+    qc.num.mads = 3, 
+    qc.filter = TRUE, 
+    num.hvgs = 2000, 
+    num.pcs = 25,
+    cluster.method = c('graph', 'kmeans'),
+    cluster.kmeans.k = 10,
+    cluster.graph.method = c("multilevel", "leiden", "walktrap"),
+    cluster.graph.num.neighbors = 10, 
+    cluster.graph.resolution = NULL, 
+    reduced.dimensions = c("tsne", "umap"),
+    tsne.perplexity = 30,
+    umap.num.neighbors = 15,
+    umap.min.dist = 0.1,
+    marker.effect.size = c("cohens.d", "auc", "delta.mean", "delta.detected"),
+    marker.summary = c("min.rank", "mean", "median", "min"),
+    marker.lfc.threshold = 0,
+    assay = 1,
+    symbol.field = NULL,
+    metadata = NULL,
+    output.dir = "simple", 
+    author = NULL,
+    dry.run = FALSE, 
+    save.results = TRUE, 
+    num.threads =1
+) {
+    restore.fun <- resetInputCache()
+    on.exit(restore.fun(), after=FALSE, add=TRUE)
+
+    if (is.null(author)) {
+        author <- Sys.info()[["user"]]
+    }
+    author.txt <- deparseToString(as.list(author))
+
+    dir.create(output.dir, showWarnings=FALSE, recursive=TRUE)
+    fname <- file.path(output.dir, "report.Rmd")
+
+    template <- system.file("templates", "solo.Rmd", package="augere.solo", mustWork=TRUE)
+    parsed <- parseRmdTemplate(readLines(template))
+
+    ##################
+    ### Setting up ###
+    ##################
+
+    rna.obj <- adt.obj <- NULL
+    main.info <- NULL
+    if (isTRUE(rna.experiment)) {
+        main.info <- c("gene", "RNA")
+        rna.obj <- "sce"
+    } else if (isTRUE(adt.experiment)) {
+        main.info <- c("tag", "ADT")
+        adt.obj <- "sce"
+    }
+    if (is.null(main.info)) {
+        parsed[["mainexp-text"]] <- NULL
+    } else {
+        parsed[["mainexp-text"]] <- replacePlaceholders(
+            parsed[["mainexp-text"]],
+            list(
+                MAIN_FEATURE_TYPE = main.info[1],
+                MAIN_MODALITY = main.info[2] 
+
+            )
+        )
+    }
+
+    altexp.text <- list()
+    altexp.names <- character()
+    altexp.template <- "SingleCellExperiment::altExp(sce, %s)"
+
+    if (is.character(rna.experiment)) {
+        altexp.text[["RNA"]]  <- replacePlaceholders(
+            parsed[["altexp-text"]],
+            list(
+                ALTEXP_SE = rna.experiment,
+                ALTEXP_FEATURE_TYPE = "gene",
+                ALTEXP_MODALITY = "RNA"
+            )
+        )
+        rna.obj <- sprintf(altexp.template, deparseToString(rna.experiment))
+        altexp.names <- c(altexp.names, rna.experiment)
+    }
+
+    if (is.character(adt.experiment)) {
+        altexp.text[["ADT"]]  <- replacePlaceholders(
+            parsed[["altexp-text"]],
+            list(
+                ALTEXP_SE = adt.experiment,
+                ALTEXP_FEATURE_TYPE = "tag",
+                ALTEXP_MODALITY = "ADT"
+            )
+        )
+        adt.obj <- sprintf(altexp.template, deparseToString(adt.experiment))
+        altexp.names <- c(altexp.names, adt.experiment)
+    }
+
+    use.rna <- !is.null(rna.obj)
+    use.adt <- !is.null(adt.obj)
+
+    parsed[["altexp-text"]] <- altexp.text
+    parsed[["initialize-se"]] <- processInputCommands(x, name="se")
+
+    if (!is.null(subset.factor)) {
+        parsed[["subset-data"]] <- replacePlaceholders(
+            parsed[["subset-data"]],
+            list(
+                SUBSET_FACTOR = deparseToString(subset.factor),
+                SUBSET_LEVELS = deparseToString(subset.levels)
+            )
+        )
+    } else {
+        parsed[["subset-data"]] <- NULL
+    }
+
+    if (use.rna) {
+        parsed[["rna-force-load"]] <- replacePlaceholders(
+            parsed[["rna-force-load"]],
+            list(
+                RNA_SE = rna.obj,
+                ASSAY = deparseToString(assay)
+            )
+        )
+    } else {
+        parsed[["rna-force-load"]] <- NULL
+    }
+
+    if (use.adt) {
+        parsed[["adt-force-load"]] <- replacePlaceholders(
+            parsed[["adt-force-load"]],
+            list(
+                ADT_SE = adt.obj,
+                ASSAY = deparseToString(assay)
+            )
+        )
+    } else {
+        parsed[["adt-force-load"]] <- NULL
+    }
+
+    if (use.adt) {
+        analysis.type <- "CITE-seq"
+    } else {
+        analysis.type <- "scRNA-seq"
+    }
+    parsed[[1]] <- replacePlaceholders(
+        parsed[[1]],
+        list(
+            AUTHOR = author.txt,
+            ANALYSIS_TYPE = analysis.type
+        )
+    )
+
+    #######################
+    ### Quality control ###
+    #######################
+
+    if (use.rna) {
+        rna.metrics.parsed <- parsed[["rna-qc-metrics"]]
+        rna.metrics.parsed[["define-mito"]] <- .define_mito_rows_code(rna.obj)
+        parsed[["rna-qc-metrics"]] <- replacePlaceholders(
+            rna.metrics.parsed,
+            list(
+                RNA_SE = rna.obj,
+                NUM_MADS = deparseToString(qc.num.mads),
+                ASSAY = deparseToString(assay),
+                NUM_THREADS = num.threads
+            )
+        )
+    } else {
+        parsed[["rna-qc-metrics"]] <- NULL
+    }
+
+    if (use.adt) {
+        adt.metrics.parsed <- parsed[["adt-qc-metrics"]]
+        parsed[["adt-qc-metrics"]] <- replacePlaceholders(
+            adt.metrics.parsed,
+            list(
+                RNA_SE = adt.obj,
+                NUM_MADS = deparseToString(qc.num.mads),
+                ASSAY = deparseToString(assay),
+                NUM_THREADS = num.threads
+            )
+        )
+    } else {
+        parsed[["adt-qc-metrics"]] <- NULL
+    }
+
+    if (qc.filter) {
+        subset.by <- character()
+        if (use.rna) {
+            subset.by <- c(subset.by, "rna.qc.df$keep")
+        }
+        if (use.adt) {
+            subset.by <- c(subset.by, "adt.qc.df$keep")
+        }
+        parsed[["filter-qc"]] <- replacePlaceholders(
+            parsed[["filter-qc"]],
+            list(QC_SUBSET = paste(subset.by, collapse=" & "))
+        )
+        parsed[["no-filter-qc"]] <- NULL
+    } else {
+        parsed[["filter-qc"]] <- NULL
+    }
+
+    #####################
+    ### Normalization ###
+    #####################
+
+    if (use.rna) {
+        parsed[["rna-norm"]] <- replacePlaceholders(
+            parsed[["rna-norm"]],
+            list(
+                RNA_SE = rna.obj,
+                ASSAY = deparseToString(assay)
+            )
+        )
+    } else {
+        parsed[["rna-norm"]] <- NULL
+    }
+
+    if (use.adt) {
+        parsed[["adt-norm"]] <- replacePlaceholders(
+            parsed[["adt-norm"]],
+            list(
+                ADT_SE = adt.obj,
+                ASSAY = deparseToString(assay)
+            )
+        )
+    } else {
+        parsed[["adt-norm"]] <- NULL
+    }
+
+    ##########################
+    ### Variance modelling ###
+    ##########################
+
+    if (use.rna) {
+        if (is.null(symbol.field)) {
+            symbol.name <- ""
+        } else {
+            symbol.name <- paste0(deparseToString(symbol.field), ", ")
+        }
+        parsed[["rna-hvg"]] <- replacePlaceholders(
+            parsed[["rna-hvg"]],
+            list(
+                RNA_SE = rna.obj,
+                TOP_HVGS = deparseToString(num.hvgs),
+                NUM_THREADS = num.threads,
+                HVG_SYMBOL_FIELD = symbol.name
+            )
+        )
+    } else {
+        parsed[["rna-hvg"]] <- NULL
+    }
+
+    ###########
+    ### PCA ###
+    ###########
+
+    if (use.rna) {
+        parsed[["rna-pca"]] <- replacePlaceholders(
+            parsed[["rna-pca"]],
+            list(
+                RNA_SE = rna.obj,
+                TOP_PCS = deparseToString(num.pcs),
+                NUM_THREADS = num.threads
+            )
+        )
+    } else {
+        parsed[["rna-pca"]] <- NULL
+    }
+
+    if (use.adt) {
+        parsed[["adt-pca"]] <- replacePlaceholders(
+            parsed[["adt-pca"]],
+            list(
+                ADT_SE = adt.obj,
+                TOP_PCS = deparseToString(num.pcs),
+                NUM_THREADS = num.threads
+            )
+        )
+    } else {
+        parsed[["adt-pca"]] <- NULL
+    }
+
+    if (use.adt && use.rna) {
+        chosen.pcs <- "combined"
+        if (is.null(main.info)) {
+            main.name <- NULL
+        } else {
+            main.name <- "PCA" 
+        }
+        parsed[["combined-pca"]] <- replacePlaceholders(
+            parsed[["combined-pca"]],
+            list(
+                MAIN_NAME = deparseToString(main.name),
+                ALTEXP_NAME = deparseToString(altexp.names),
+                NUM_THREADS = num.threads
+            )
+        )
+    } else {
+        parsed[["combined-pca"]] <- NULL
+        chosen.pcs <- "PCA"
+    }
+
+    ##########################
+    ### k-means clustering ###
+    ##########################
+
+    cluster.method <- match.arg(cluster.method, several.ok=TRUE)
+    if ("kmeans" %in% cluster.method) {
+        parsed[["cluster-kmeans"]] <- replacePlaceholders(
+            parsed[["cluster-kmeans"]],
+            list(
+                CLUSTER_KMEANS_K = cluster.kmeans.k,
+                NUM_THREADS = num.threads,
+                CHOSEN_PCS = deparseToString(chosen.pcs)
+            )
+        )
+    } else {
+        parsed[["cluster-kmeans"]] <- NULL 
+    }
+
+    ##########################
+    ### Neighbor detection ###
+    ##########################
+
+    parsed.nn <- parsed[["neighbor-steps"]]
+    nn.replacements <- list(
+        CHOSEN_PCS = deparseToString(chosen.pcs),
+        NUM_THREADS = num.threads
+    )
+    graph.in.use <- FALSE 
+    plot.in.use <- FALSE
+
+    if ("graph" %in% cluster.method) {
+        cluster.graph.method <- match.arg(cluster.graph.method)
+        cluster.args <- list(method = cluster.graph.method)
+        if (cluster.graph.method == "leiden") {
+            cluster.args$leiden.resolution <- cluster.graph.resolution
+        } else if (cluster.graph.method == "multilevel") {
+            cluster.args$multilevel.resolution <- cluster.graph.resolution
+        }
+        nn.replacements$BUILD_SNN_GRAPH_ARGS <- deparseToString(list(num.neighbors = cluster.graph.num.neighbors))
+        nn.replacements$CLUSTER_GRAPH_ARGS <- deparseToString(cluster.args)
+        graph.in.use <- TRUE
+    } else {
+        parsed.nn[["cluster-graph"]] <- NULL 
+        nn.replacements$BUILD_SNN_GRAPH_ARGS <- "NULL"
+        nn.replacements$CLUSTER_GRAPH_ARGS <- "NULL"
+    }
+
+    parsed.plot <- parsed.nn[["plot-any"]]
+    colour.by.choice <- ""
+    if (length(cluster.method) > 0) {
+        if (cluster.method[1] == "kmeans") {
+            chosen.cluster <- "kmeans.cluster"
+        } else {
+            chosen.cluster <- "graph.cluster"
+        }
+        colour.by.choice <- sprintf(", colour_by = %s", deparseToString(chosen.cluster))
+    }
+
+    if ("tsne" %in% reduced.dimensions) {
+        nn.replacements$TSNE_ARGS <- deparseToString(list(perplexity = tsne.perplexity))
+        parsed.plot[["plot-tsne"]] <- replacePlaceholders(
+            parsed.plot[["plot-tsne"]],
+            list(COLOUR_BY_CLUSTER_CHOICE = colour.by.choice)
+        )
+        plot.in.use <- TRUE
+    } else {
+        parsed.plot[["plot-tsne"]] <- NULL
+        nn.replacements$TSNE_ARGS <- "NULL"
+    }
+
+    if ("umap" %in% reduced.dimensions) {
+        nn.replacements$UMAP_ARGS <- deparseToString(list(num.neighbors = umap.num.neighbors, min.dist = umap.min.dist))
+        parsed.plot[["plot-umap"]] <- replacePlaceholders(
+            parsed.plot[["plot-umap"]],
+            list(COLOUR_BY_CLUSTER_CHOICE = colour.by.choice)
+        )
+        plot.in.use <- TRUE
+    } else {
+        parsed.plot[["plot-umap"]] <- NULL
+        clust.replacements$UMAP_ARGS <- "NULL"
+    }
+
+    if (plot.in.use) {
+        parsed.nn[["plot-any"]] <- parsed.plot
+    } else {
+        parsed.nn[["plot-any"]] <- NULL
+    }
+
+    if (plot.in.use || graph.in.use) {
+        parsed[["neighbor-steps"]] <- replacePlaceholders(parsed.nn, nn.replacements)
+    } else {
+        parsed[["neighbor-steps"]] <- NULL
+    }
+
+    ###############
+    ### Markers ###
+    ###############
+
+    marker.summary <- match.arg(marker.summary)
+    marker.effect.size <- match.arg(marker.effect.size)
+    marker.field <- paste0(marker.effect.size, ".", marker.summary)
+
+    marker.config <- list()
+    if (use.rna) {
+        marker.config$RNA <- list(lower="rna", feature="gene", se=rna.obj)
+    }
+    if (use.adt) {
+        marker.config$ADT <- list(lower="adt", feature="tag", se=adt.obj)
+    }
+
+    parsed.markers <- parsed[["markers"]]
+    all.markers <- list()
+    for (mod in names(marker.config)) {
+        payload <- marker.config[[mod]]
+        current <- parsed.markers[["modality"]]
+
+        if (is.null(symbol.field)) {
+            current[["show-marker-symbols"]] <- NULL
+        } else {
+            current[["show-marker-symbols"]] <- replacePlaceholders(
+                current[["show-marker-symbols"]],
+                list(
+                    MARKER_PREFIX = payload$lower,
+                    SYMBOL_FIELD = deparseToString(symbol.field)
+                )
+            )
+            current[["show-marker-ids"]] <- NULL
+        }
+
+        more.args <- ""
+        if (marker.lfc.threshold) {
+            more.args <- sprintf("\n    more.marker.args = list(threshold = %s),", marker.lfc.threshold)
+        }
+
+        all.markers[[mod]] <- replacePlaceholders(
+            current,
+            list(
+                MARKER_MODALITY = mod,
+                CHOSEN_CLUSTER = deparseToString(chosen.cluster),
+                MARKER_FEATURE_TYPE = payload$feature,
+                MARKER_SE = payload$se,
+                MARKER_PREFIX = payload$lower,
+                MARKER_ORDER = deparseToString(marker.field),
+                MARKER_ARGS = more.args,
+                NUM_THREADS = num.threads
+            )
+        )
+    }
+
+    parsed.markers[["modality"]] <- all.markers
+    parsed$markers <- parsed.markers
+
+    ##############
+    ### Saving ###
+    ##############
+
+    merge.metadata <- !is.null(metadata)
+    if (merge.metadata) {
+        parsed[["create-common-metadata"]] <- replacePlaceholders(
+            parsed[["create-common-metadata"]],
+            list(COMMON_METADATA = deparseToString(metadata))
+        )
+    } else {
+        parsed[["create-common-metadata"]] <- NULL
+    }
+
+    if (!use.rna) {
+        parsed[["save-rna-qc"]] <- NULL
+        parsed[["save-rna-markers"]] <- NULL
+    } else {
+        parsed[["save-rna-markers"]] <- replacePlaceholders(
+            parsed[["save-rna-markers"]],
+            list(
+                AUTHOR = author.txt,
+                MARKER_ORDER = deparseToString(marker.field),
+                CHOSEN_CLUSTER = deparseToString(chosen.cluster)
+            )
+        )
+        parsed[["save-rna-qc"]] <- replacePlaceholders(
+            parsed[["save-rna-qc"]],
+            list(AUTHOR = author.txt)
+        )
+        if (merge.metadata) {
+            parsed[["save-rna-qc"]][["no-merge-metadata"]] <- NULL
+            parsed[["save-rna-markers"]][["no-merge-metadata"]] <- NULL
+        } else {
+            parsed[["save-rna-qc"]][["merge-metadata"]] <- NULL
+            parsed[["save-rna-markers"]][["merge-metadata"]] <- NULL
+        }
+    }
+
+    if (!use.adt) {
+        parsed[["save-adt-qc"]] <- NULL
+        parsed[["save-adt-markers"]] <- NULL
+    } else {
+        parsed[["save-adt-markers"]] <- replacePlaceholders(
+            parsed[["save-adt-markers"]],
+            list(
+                AUTHOR = author.txt,
+                MARKER_ORDER = deparseToString(marker.field),
+                CHOSEN_CLUSTER = deparseToString(chosen.cluster)
+            )
+        )
+        parsed[["save-adt-qc"]] <- replacePlaceholders(
+            parsed[["save-adt-qc"]],
+            list(AUTHOR = author.txt)
+        )
+        if (merge.metadata) {
+            parsed[["save-adt-qc"]][["no-merge-metadata"]] <- NULL
+            parsed[["save-adt-markers"]][["no-merge-metadata"]] <- NULL
+        } else {
+            parsed[["save-adt-qc"]][["merge-metadata"]] <- NULL
+            parsed[["save-adt-markers"]][["merge-metadata"]] <- NULL
+        }
+    }
+
+    writeRmd(parsed, file=fname)
+    if (dry.run) {
+        return(NULL)
+    }
+
+    if (save.results) {
+        skip.chunks <- NULL
+    } else {
+        skip.chunks <- c("save-directory", "save-sce", "save-qc", "save-markers")
+    }
+
+    # Avoid spewing out cat() statements in the marker detection section.
+    parsed$markers <- sub("^ *cat\\(", "list\\(", unlist(parsed$markers))
+
+    env <- new.env()
+    compileReport(fname, env=env, skip.chunks=skip.chunks, contents=parsed)
+
+    output <- list(sce=env$sce)
+    if (use.rna) {
+        output$qc.rna <- env$rna.qc.df
+        output$markers.rna <- env$rna.markers
+    }
+    if (use.adt) {
+        output$qc.adt <- env$adt.qc.df
+        output$markers.adt <- env$adt.markers
+    }
+
+    output
+}

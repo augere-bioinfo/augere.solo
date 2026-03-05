@@ -1,0 +1,659 @@
+---
+title: "Simple analysis of <%= ANALYSIS_TYPE %> data"
+author: <%= AUTHOR %>
+date: "`r Sys.Date()`"
+output:
+  BiocStyle::html_document:
+    toc_float: yes
+    titlecaps: false 
+  md_document:
+    preserve_yaml: yes
+---
+
+```{r preamble, echo=FALSE}
+knitr::opts_chunk$set(error=FALSE, warning=FALSE, message=FALSE)
+```
+
+# Data loading
+
+Our `SummarizedExperiment` object contains all of the experimental data and metadata for this study.
+Each column is assumed to correspond to a single cell.
+:BEGIN mainexp-text
+The main experiment contains <%= MAIN_MODALITY %> data where each row corresponds to a <%= MAIN_FEATURE_TYPE %>.
+:END
+:BEGIN altexp-text
+The alternative experiment `<%= ALTEXP_SE %>` contains <%= ALTEXP_MODALITY %> data where each row corresponds to a <%= ALTEXP_FEATURE_TYPE %>.
+:END
+
+```{r}
+:BEGIN initialize-se
+:END
+se
+```
+
+We convert `se` into a `SingleCellExperiment` if it wasn't already one.
+
+```{r}
+loadNamespace("SingleCellExperiment")
+sce <- as(se, "SingleCellExperiment")
+```
+
+:BEGIN subset-data
+We subset the `SummarizedExperiment` to the desired levels of a factor of interest.
+
+```{r}
+sub.factor <- <%= SUBSET_FACTOR %>
+sub.levels <- <%= SUBSET_LEVELS %>
+sce <- sce[,SummarizedExperiment::colData(sce)[,sub.factor] %in% sub.levels]
+summary(samp.keep)
+```
+:END
+
+We also coerce each input matrix to Bioconductor's sparse format.
+This isn't strictly necessary but it avoids silent performance degradation from inefficient formats (e.g., file-backed, `dgTMatrix` objects).
+
+```{r}
+loadNamespace("SparseArray")
+:BEGIN rna-force-load
+SummarizedExperiment::assay(<%= RNA_SE %>, <%= ASSAY %>, withDimnames=FALSE) <- local({
+    mat <- SummarizedExperiment::assay(<%= RNA_SE %>, <%= ASSAY %>, withDimnames=FALSE)
+    DelayedArray::DelayedArray(as(mat, "SVT_SparseMatrix"))
+})
+:END
+:BEGIN adt-force-load
+SummarizedExperiment::assay(<%= ADT_SE %>, <%= ASSAY %>, withDimnames=FALSE) <- local({
+    mat <- SummarizedExperiment::assay(<%= ADT_SE %>, <%= ASSAY %>, withDimnames=FALSE)
+    DelayedArray::DelayedArray(as(mat, "SVT_SparseMatrix"))
+})
+:END
+```
+
+# Quality control
+
+:BEGIN rna-qc-metrics
+## For RNA
+
+We compute per-cell QC metrics from the RNA counts.
+If mitochondrial genes are present, we use them as a control subset.
+High mitochondrial proportions are indicators of cell damage as cytoplasmic transcripts leak out of the cell.
+
+```{r}
+:BEGIN define-mito
+:END
+summary(is.mito)
+
+<%= RNA_SE %> <- scrapper::quickRnaQc.se(
+    <%= RNA_SE %>,
+    assay.type = <%= ASSAY %>,
+    subsets = list(mito = is.mito),
+    more.suggest.args = list(num.mads = <%= NUM_MADS %>),
+    num.threads = <%= NUM_THREADS %>
+)
+
+# Storing the unfiltered metrics in a separate DF for posterity.
+rna.qc.fields <- c("sum", "detected", "subset.proportion.mito", "keep")
+rna.qc.df <- SummarizedExperiment::colData(<%= RNA_SE %>)[,rna.qc.fields]
+rna.qc.df
+```
+
+Filtering thresholds are automatically suggested for each metric using an outlier-based approach.
+The idea is that low-quality cells will have outlier values (in the "bad" direction) for one or more of the metrics.
+A cell is considered to be of low quality if its library size or number of detected features is too small, or if the mitochondrial proportion is too high.
+
+```{r}
+thresholds <- S4Vectors::metadata(<%= RNA_SE %>)$qc$thresholds
+thresholds
+```
+
+We can count the number of cells that would be retained according to these thresholds.
+
+```{r}
+summary(rna.qc.df$keep)
+```
+
+We might as well make some plots at this point.
+
+```{r}
+scater::plotColData(<%= RNA_SE %>, y = "sum", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") + 
+    scater::categoricalHlines(x = NULL, y = thresholds[["sum"]])
+
+scater::plotColData(<%= RNA_SE %>, y = "detected", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") +
+    scater::categoricalHlines(x = NULL, y = thresholds[["sum"]])
+
+scater::plotColData(<%= RNA_SE %>, y = "subset.proportion.mito", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") +
+    scater::categoricalHlines(x = NULL, y = thresholds[["subset.proportion"]][["mito"]])
+```
+:END
+
+:BEGIN adt-qc-metrics
+## For ADT
+
+We compute per-cell QC metrics from the ADT counts.
+We use the IgG tags as the subset of control features if they are available.
+High IgG counts are indicators of non-specific antibody aggregates. 
+
+```{r}
+is.igg <- grepl("IgG", rownames(<%= ADT_SE %>))
+summary(is.igg)
+
+<%= ADT_SE %> <- scrapper::quickAdtQc.se(
+    <%= ADT_SE %>,
+    assay.type = <%= ASSAY %>,
+    subsets = list(igg = is.igg),
+    num.threads =<%=  NUM_THREADS %>
+)
+
+# Storing the unfiltered metrics in a separate DF for posterity.
+adt.qc.fields <- c("sum", "detected", "subset.sum.igg")
+adt.qc.df <- SummarizedExperiment::colData(<%= ADT_SE %>)[,adt.qc.fields]
+adt.qc.df
+```
+
+Filtering thresholds are automatically suggested for each metric using an outlier-based approach.
+The idea is that low-quality cells will have outlier values (in the "bad" direction) for one or more of the metrics.
+A cell is considered to be of low quality if its number of detected tags is too small or if its IgG count is too high.
+
+```{r}
+S4Vectors::metadata(<%= ADT_SE %>)$qc$thresholds
+```
+
+We can count the number of cells that would be retained according to these thresholds.
+
+```{r}
+summary(adt.qc.df$keep)
+```
+
+We might as well make some plots at this point.
+
+```{r}
+scater::plotColData(<%= ADT_SE %>, y = "sum", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") + 
+    scater::categoricalHlines(x = NULL, y = thresholds[["sum"]])
+
+scater::plotColData(<%= ADT_SE %>, y = "detected", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") +
+    scater::categoricalHlines(x = NULL, y = thresholds[["detected"]])
+
+scater::plotColData(<%= ADT_SE %>, y = "subset.sum.igg", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") +
+    scater::categoricalHlines(x = NULL, y = thresholds[["subset.sum"]][["igg"]])
+```
+:END
+
+## Applying the filter
+
+:BEGIN filter-qc
+We apply those filters to subset the dataset so that we only retain high-quality cells in all modalities of interest.
+This simplifies interpretation of the results as we don't have to worry as much about removing low-quality artifacts in later steps.
+
+```{r}
+keep <- <%= QC_SUBSET %>
+sce <- sce[,keep]
+summary(keep)
+```
+:END
+
+:BEGIN no-filter-qc
+Well, actually, we don't apply any filtering to our matrix.
+Instead, we'll manually remove low-quality artifacts after clustering.
+This aims to minimize the risk of removing genuine cell subpopulations.
+:END
+
+# Normalization
+
+We perform scaling normalization to remove technical biases in sequencing depth, capture efficiency, etc. between cells.
+Specifically, we compute a size factor for each cell and divide that cell's counts by its factor to obtain normalized expression values.
+Removal of these biases simplifies comparisons between cells in downstream analyses. 
+We also log-transform so that differences in the log-normalized expression values represent log-fold changes in downstream analyses.
+
+:BEGIN rna-norm
+## For RNA
+
+For the RNA count matrix, we use the total sum for each cell to compute library size-based size factors.
+
+```{r}
+<%= RNA_SE %> <- scrapper::normalizeRnaCounts.se(
+    <%= RNA_SE %>,
+    size.factors = SummarizedExperiment::colData(<%= RNA_SE %>)$sum,
+    assay.type = <%= ASSAY %>
+)
+summary(BiocGenerics::sizeFactors(<%= RNA_SE %>))
+```
+
+We visualize the size factors, which are just scaled versions of the library sizes:
+
+```{r}
+scater::plotColData(<%= RNA_SE %>, x=NULL, y="sizeFactor") +
+    ggplot2::scale_y_log10()
+```
+
+We can also look at the log-transformed counts:
+
+```{r}
+SingleCellExperiment::logcounts(<%= RNA_SE %>)
+```
+:END
+
+:BEGIN adt-norm
+## For ADT
+
+For the ADT count matrix, we use the (adjusted) geometric mean of counts within each cell to compute a size factor.
+Unlike the library size, this is more robust to any spikes in abundance for a few ADTs.
+Such spikes are not uncommon due to the binary nature of many surface targets.
+
+```{r}
+<%= ADT_SE %> <- scrapper::normalizeAdtCounts.se(
+    <%= ADT_SE %>,
+    assay.type = <%= ASSAY %>
+)
+summary(BiocGenerics::sizeFactors(<%= ADT_SE %>))
+```
+
+We visualize the size factors:
+
+```{r}
+scater::plotColData(<%= ADT_SE %>, x=NULL, y="sizeFactor") +
+    ggplot2::scale_y_log10()
+```
+
+We can also look at the log-transformed counts:
+
+```{r}
+SingleCellExperiment::logcounts(<%= ADT_SE %>)
+```
+:END
+
+:BEGIN rna-hvg
+# Variance modelling
+
+We identify highly variable genes (HVGs) from the log-normalized RNA counts. 
+The idea is to only use the HVGs in downstream analyses to enrich for biological signal and reduce computational work.
+
+```{r}
+<%= RNA_SE %> <- scrapper::chooseRnaHvgs.se(
+    <%= RNA_SE %>,
+    top = <%= TOP_HVGS %>,
+    num.threads = <%= NUM_THREADS %>,
+    more.var.args = list(use.min.width = TRUE)
+)
+
+rna.hvg.fields <- c(<%= HVG_SYMBOL_FIELD %>"means", "variances", "fitted", "residuals")
+rna.hvg.df <- SummarizedExperiment::rowData(<%= RNA_SE %>)[,rna.hvg.fields]
+```
+
+To model the mean-variance relationship in log-count data, we fit a mean-dependent trend to the variances of the log-expression values. 
+We set a minimum width on the trend-fitting window to mitigate imbalances in the distribution of gene abundances.
+
+```{r}
+fun <- approxfun(x = rna.hvg.df$means, y = rna.hvg.df$fitted, ties=mean)
+scater::plotRowData(<%= RNA_SE %>, x = "means", y = "variances", colour_by="hvg") +
+    ggplot2::geom_function(fun = fun, colour = "dodgerblue")
+```
+
+We then define the highly variable genes as those with the largest residuals.
+
+```{r}
+head(rna.hvg.df[order(rna.hvg.df$residuals, decreasing=TRUE),], 10)
+summary(rna.hvg.df$hvg)
+```
+:END
+
+# Principal components analysis
+
+We perform PCA on the log-normalized data to obtain the top few principal components.
+We use these PCs instead of the log-expression matrix in downstream steps, 
+where distances between cells in PC space approximate the distances in the original expression space.
+Focusing on the top PCs allows us to remove technical noise and reduce computational work.
+
+:BEGIN rna-pca
+## For RNA
+
+For the RNA log-expression matrix, we perform a PCA on the previously-selected HVGs.
+This enriches for biological variation while reducing compute time.
+
+```{r}
+<%= RNA_SE %> <- scrapper::runPca.se(
+    <%= RNA_SE %>,
+    features = SummarizedExperiment::rowData(<%= RNA_SE %>)$hvg,
+    number = <%= TOP_PCS %>, 
+    num.threads=<%= NUM_THREADS %>
+)
+dim(reducedDim(<%= RNA_SE %>, "PCA"))
+```
+
+Let's have a look at the percentage of variance explained for each successive PC:
+
+```{r}
+rna.pca.info <- metadata(<%= RNA_SE %>)$PCA
+rna.prop.exp <- rna.pca.info$variance.explained / rna.pca.info$total.variance * 100
+plot(cumsum(rna.prop.exp), ylab="Variance explained (%)", xlab="PC number", type="b")
+```
+:END
+
+:BEGIN adt-pca
+## For ADT
+
+For the ADT log-expression matrix, we perform a PCA on all of the tags.
+There's not much point limiting ourselves to the most variable tags;
+there are usually much fewer tags than genes, and sometimes fewer tags than the number of PCs,
+in which case the PCA is just a rotation of the input data.
+
+```{r}
+adt.pca <- scrapper::runPca.se(
+    <%= ADT_SE %>,
+    features = NULL,
+    number = <%= TOP_PCS %>, 
+    num.threads = <%= NUM_THREADS %>
+)
+dim(reducedDim(<%= ADT_SE %>, "PCA"))
+```
+
+Let's have a look at the percentage of variance explained for each successive PC:
+
+```{r}
+adt.pca.info <- metadata(<%= ADT_SE %>)$PCA
+adt.prop.exp <- adt.pca.info$variance.explained / adt.pca.info$total.variance * 100
+plot(cumsum(adt.prop.exp), ylab="Variance explained (%)", xlab="PC number", type="b")
+```
+:END
+
+:BEGIN combined-pca
+## Combining modalities
+
+We combine PCs from different modalities for downstream analyses. 
+This involves scaling each matrix so that each modality has a comparable level of within-population variance,
+and then combining those matrices together.
+
+```{r}
+altexp.to.combine <- <%= ALTEXP_NAMES %>
+sce <- scrapper::scaleByNeighbors.se(
+    sce,
+    main.reddims = <%= MAIN_NAME %>,
+    altexp.reddims = setNames(rep("PCA", length(altexps.to.combine)), altexps.to.combine),
+    num.threads = <%= NUM_THREADS %>
+)
+dim(reducedDim(sce, "combined"))
+```
+
+We can also look at the scaling factors for each modality.
+A larger value indicates that the corresponding modality's PCs were up-scaled more than the other modalities. 
+
+```{r}
+metadata(sce)$combined
+```
+:END
+
+:BEGIN cluster-kmeans
+# k-means clustering
+
+We use k-means clustering to quickly identify clusters of similar cells.
+This uses variance partitioning to initialize the cluster centroids, and then refines the clustering with the Hartigan-Wong algorithm.
+
+```{r}
+sce <- scrapper::clusterKmeans.se(
+    sce,
+    k = <%= CLUSTER_KMEANS_K %>,
+    num.threads = <%= NUM_THREADS %>,
+    output.name = "kmeans.cluster",
+    reddim.type = <%= CHOSEN_PCS %>
+)
+```
+
+k-means can be used to obtain clusters for downstream interpretation.
+More typically, a large `k` is used to partition cells into many small clusters that serve as input into more computationally expensive steps.
+
+```{r}
+table(sce$kmeans.cluster)
+```
+:END
+
+:BEGIN neighbor-steps
+# Graph-based clustering and visualization
+
+Several neighbor-related steps downstream of the PCA are bundled into a single function. 
+This includes graph-based clustering, t-SNE and/or UMAP, which are run in parallel for speed.
+Each of these can also be run separately, e.g., with `runUmap.se()` if more control of the parameters is required.
+
+```{r}
+sce <- scrapper::runAllNeighborSteps.se(
+    sce,
+    more.tsne.args = <%= TSNE_ARGS %>,
+    more.umap.args = <%= UMAP_ARGS %>,
+    more.build.graph.args = <%= BUILD_SNN_GRAPH_ARGS %>,
+    more.cluster.graph.args = <%= CLUSTER_GRAPH_ARGS %>,
+    cluster.output.name = "graph.cluster",
+    num.threads = <%= NUM_THREADS %>,
+    reddim.type = <%= CHOSEN_PCS %>
+)
+```
+
+:BEGIN cluster-snn
+We use graph-based clustering to find communities of related cells.
+Specifically, we build a shared-nearest neighbors graph where the nodes are cells and edges are created between neighboring cells.
+We then apply a community detection algorithm to find groups of cells that are enriched for intra-group edges compared to inter-group edges.
+
+```{r}
+table(sce$graph.cluster)
+```
+:END
+
+:BEGIN plot-any
+Alright, let's get onto the _real_ business of single-cell data analysis -
+namely, to make some pretty plots to visualize our dataset.
+
+:BEGIN plot-tsne
+```{r, fig.asp=1, fig.wide=TRUE}
+scater::plotReducedDim(sce, "TSNE"<%= COLOUR_BY_CLUSTER_CHOICE %>)
+```
+:END
+
+:BEGIN plot-umap
+```{r, fig.asp=1, fig.wide=TRUE}
+scater::plotReducedDim(sce, "UMAP"<%= COLOUR_BY_CLUSTER_CHOICE %>)
+```
+:END
+
+:END
+
+:END
+
+:BEGIN markers
+# Marker detection
+
+For each modality, we create a ranking of marker features for each cluster.
+Specifically, we compute effect sizes (e.g., Cohen's $d$, AUC) from pairwise comparisons between clusters.
+Then, for each cluster, we summarize the effect sizes into a variety of statistics (e.g., mean, median) that can be used for ranking potential markers. 
+Different combinations of effect sizes and summary statistics yield rankings that focus on different types of markers.
+
+:BEGIN modality
+## For <%= MARKER_MODALITY %> {.tabset}
+
+We compute marker statistics for each <%= MARKER_FEATURE_TYPE %>. 
+
+```{r}
+<%= MARKER_PREFIX %>.markers <- scrapper::scoreMarkers.se(
+    <%= MARKER_SE %>,
+    SummarizedExperiment::colData(sce)[[<%= CHOSEN_CLUSTER %>]],<%= MARKER_ARGS %>
+    order.by = <%= MARKER_ORDER %>,
+    num.threads = <%= NUM_THREADS %>
+)
+names(<%= MARKER_PREFIX %>.markers)
+```
+
+For each cluster, we obtain a `DataFrame` that contains one potential ranking of marker genes, along with all of the assorted statistics.
+
+```{r}
+scrapper::previewMarkers(<%= MARKER_PREFIX %>.markers[["1"]])
+```
+
+We then display the relative log-expression for the top 20 markers of each cluster.
+
+```{r, results='asis'}
+for (n in names(<%= MARKER_PREFIX %>.markers)) {
+    cat("\n\n### ", n, " {-}\n")
+    scater::plotGroupedHeatmap(
+        <%= MARKER_SE %>,
+        group = <%= CHOSEN_CLUSTER %>,
+        center = TRUE,
+        main = paste('Cluster', n),
+:BEGIN show-marker-symbols
+        features = head(MARKER_PREFIX %>.markers[[n]][[<%= SYMBOL_FIELD %>]], 20),
+        swap_rownames = <%= SYMBOL_FIELD %>,
+:END
+:BEGIN show-marker-ids
+        features = head(rownames(<%= MARKER_PREFIX %>.markers[[n]]), 20),
+:END
+        cluster_cols = FALSE
+    )
+}
+```
+:END
+
+:END
+
+# Saving results
+
+We create a directory in which to save results.
+
+```{r save-directory}
+result.dir <- "results"
+dir.create(result.dir)
+```
+
+:BEGIN create-common-metadata
+We also set up some extra metadata to add to each result.
+
+```{r}
+common.meta <- <%= COMMON_METADATA %>
+```
+:END
+
+We save our `SingleCellExperiment` object containing most of our results:
+
+```{r save-sce}
+sce.meta <- list(
+    title = "SingleCellExperiment for a simple <%= ANALYSIS_TYPE %> analysis",
+    authors = <%= AUTHOR %>,
+    type = "single_cell_experiment"
+)
+
+augere.core::saveResult(
+    normalized,
+    file.path(result.dir, "sce"), 
+:BEGIN merge-metadata
+    metadata=c(common.meta, sce.meta)
+:END
+:BEGIN no-merge-metadata
+    metadata=sce.meta
+:END
+)
+```
+
+Saving the `DataFrame`s of QC statistics for each modality:
+
+```{r save-qc}
+:BEGIN save-rna-qc
+rna.qc.meta <- list(
+    title = "Quality control metrics for RNA data",
+    authors = <%= AUTHOR %>,
+    type = "data_frame"
+)
+
+augere.core::saveResult(
+    rna.qc.df,
+    file.path(result.dir, "qc-rna"),
+:BEGIN merge-metadata
+    metadata=c(common.meta, rna.qc.meta)
+:END
+:BEGIN no-merge-metadata
+    metadata=rna.qc.meta
+:END
+)
+:END
+
+:BEGIN save-adt-qc
+adt.qc.meta <- list(
+    title = "Quality control metrics for ADT data",
+    authors = <%= AUTHOR %>,
+    type = "data_frame"
+)
+
+augere.core::saveResult(
+    adt.qc.df,
+    file.path(result.dir, "qc-adt"),
+:BEGIN merge-metadata
+    metadata=c(common.meta, adt.qc.meta)
+:END
+:BEGIN no-merge-metadata
+    metadata=adt.qc.meta
+:END
+)
+:END
+```
+
+Finally, we store the marker rankings for each cluster.
+
+```{r save-markers}
+:BEGIN save-rna-markers
+dir.create(file.path(result.dir, "markers-rna"))
+for (i in names(rna.markers)) {
+    rna.marker.metadata <- list(
+        title = sprintf("Marker genes for cluster %s", i),
+        authors = <%= AUTHOR %>,
+        type = "marker_gene_detection",
+        marker_gene_detection=list(
+            group = i, 
+            order = <%= MARKER_ORDER %>, 
+            factor = <%= CHOSEN_CLUSTER %>
+        )
+    )
+
+    augere.core::saveResult(
+        rna.markers[[i]],
+        file.path(result.dir, "markers-rna", i),
+:BEGIN merge-metadata
+        metadata=c(common.meta, rna.marker.meta)
+:END
+:BEGIN no-merge-metadata
+        metadata=rna.marker.meta
+:END
+    )
+}
+:END
+
+:BEGIN save-adt-markers
+dir.create(file.path(result.dir, "markers-adt"))
+for (i in names(adt.markers)) {
+    adt.marker.meta <- list(
+        title=sprintf("Marker tags for cluster %s", i),
+        authors = <%= AUTHOR %>,
+        type = "marker_gene_detection",
+        marker_gene_detection = list(
+            group = i, 
+            order = <%= MARKER_ORDER %>, 
+            factor = <%= CHOSEN_CLUSTER %>
+        )
+    )
+
+    augere.core::saveResult(
+        rna.markers[[i]],
+        file.path(result.dir, "markers-rna", i),
+:BEGIN merge-metadata
+        metadata=c(common.meta, adt.marker.meta)
+:END
+:BEGIN no-merge-metadata
+        metadata=adt.marker.meta
+:END
+    )
+}
+:END
+```
+
+# Session information {-}
+
+```{r}
+sessionInfo()
+```
