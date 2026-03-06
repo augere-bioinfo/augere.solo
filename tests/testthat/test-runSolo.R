@@ -6,7 +6,8 @@ ncells <- 200L
 mu <- 2^rnorm(10000)
 y <- matrix(rpois(ngenes * ncells, lambda=mu), ncol=ncells)
 se <- SummarizedExperiment::SummarizedExperiment(list(counts=y))
-SummarizedExperiment::rowRanges(se) <- GenomicRanges::GRanges(sample(c("chrM", "chrA"), size=ngenes, prob=c(0.01, 0.99), replace=TRUE), IRanges::IRanges(1, 1))
+is.mito <- rbinom(ngenes, 1, 0.01) == 1
+SummarizedExperiment::rowRanges(se) <- GenomicRanges::GRanges(c("chrA", "chrM")[is.mito + 1], IRanges::IRanges(1, 1))
 rownames(se) <- sprintf("GENE-%s", seq_len(ngenes))
 
 tmp <- tempfile()
@@ -46,8 +47,8 @@ test_that("runSolo works with a subset", {
     chosen <- LETTERS[1:20]
 
     tmp <- tempfile()
-    output <- runSolo(copy, subset.factor="blah", subset.levels=chosen, output.dir=tmp, save.results=FALSE)
-    ref <- runSolo(copy[,copy$blah %in% chosen], output.dir=tmp, save.results=FALSE)
+    output <- runSolo(copy, subset.factor="blah", subset.levels=chosen, output.dir=tmp, reduced.dimensions=NULL, save.results=FALSE)
+    ref <- runSolo(copy[,copy$blah %in% chosen], output.dir=tmp, reduced.dimensions=NULL, save.results=FALSE)
     expect_equal(output, ref)
 })
 
@@ -60,12 +61,29 @@ test_that("runSolo works without QC filtering", {
     expect_identical(output$qc.rna, ref$qc.rna)
 })
 
-test_that("runSolo works with a GRL for mito extraction", {
+test_that("runSolo works with a GRL for mitochondrial identification", {
     copy <- se
     SummarizedExperiment::rowRanges(copy) <- as(SummarizedExperiment::rowRanges(se), "GRangesList")
+
     tmp <- tempfile()
-    output2 <- runSolo(copy, reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
-    expect_identical(ref$qc.rna$subset.proportion.mito, output2$qc.rna$subset.proportion.mito)
+    output <- runSolo(copy, reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+    expect_identical(ref$qc.rna$subset.proportion.mito, output$qc.rna$subset.proportion.mito)
+})
+
+test_that("runSolo works with regex for mitochondrial genes", {
+    copy <- se
+    new.ids <- sprintf("%s%s", ifelse(is.mito, "mt-", ""), rownames(copy)) 
+    rownames(copy) <- new.ids
+
+    tmp <- tempfile()
+    output <- runSolo(copy, qc.mito.regex="^mt-", reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+    expect_identical(ref$qc.rna$subset.proportion.mito, output$qc.rna$subset.proportion.mito)
+
+    # Also works if you stick it in a symbol.
+    copy <- se
+    SummarizedExperiment::rowData(copy)$SYMBOL <- new.ids
+    output <- runSolo(copy, qc.mito.regex="^mt-", symbol.field="SYMBOL", reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+    expect_identical(ref$qc.rna$subset.proportion.mito, output$qc.rna$subset.proportion.mito)
 })
 
 test_that("runSolo works with k-means", {
@@ -201,6 +219,18 @@ test_that("runSolo works with only ADTs", {
     expect_identical(SingleCellExperiment::reducedDim(adt2$sce, "TSNE"), SingleCellExperiment::reducedDim(adt$sce, "TSNE"))
     expect_identical(adt2$qc.adt, adt$qc.adt)
     expect_identical(adt2$markers, adt$markers)
+})
+
+test_that("runSolo works with regex for IgG symbols", {
+    copy <- ase
+    tmp <- tempfile()
+    adt <- runSolo(ase, adt.experiment=TRUE, rna.experiment=NULL, reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+
+    SummarizedExperiment::rowData(copy)$SYMBOL <- rownames(copy)
+    rownames(copy) <- sprintf("whee-%s", seq_len(nrow(copy)))
+    symb <- runSolo(copy, symbol.field="SYMBOL", adt.experiment=TRUE, rna.experiment=NULL, reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+
+    expect_identical(adt$qc.adt$subset.sum.igg, symb$qc.adt$subset.sum.igg)
 })
 
 test_that("runSolo works with RNA plus ADTs", {

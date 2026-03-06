@@ -10,11 +10,14 @@ runSolo(
   adt.experiment = NULL,
   subset.factor = NULL,
   subset.levels = NULL,
+  qc.mito.seqnames = c("MT", "M", "chrM", "chrMT"),
+  qc.mito.regex = NULL,
+  qc.igg.regex = "IgG|igg|IGG",
   qc.num.mads = 3,
   qc.filter = TRUE,
   num.hvgs = 2000,
   num.pcs = 25,
-  cluster.method = c("graph", "kmeans"),
+  cluster.method = "graph",
   cluster.kmeans.k = 10,
   cluster.graph.method = c("multilevel", "leiden", "walktrap"),
   cluster.graph.num.neighbors = 10,
@@ -54,6 +57,18 @@ If \code{FALSE} or \code{NULL}, it is assumed that no ADT data is available.}
 
 \item{subset.levels}{Vector containing the subset of levels to retain in the factor specified by \code{subset.factor}.}
 
+\item{qc.mito.seqnames}{Character vector containing the sequence names of the mitochondrial chromosome.
+Only used if \code{rna.experiment=} indicates that RNA data is available and \code{qc.mito.regex=} is not specified.}
+
+\item{qc.mito.regex}{String containing a regular expression to identify mitochondrial genes from the row names.
+If \code{symbol.field=} is specified, this is applied to the gene symbols instead.
+If \code{NULL}, the mitochondrial genes are identified from the sequence names of \code{\link[SummarizedExperiment]{rowRanges}} matching \code{qc.mito.seqnames}. 
+Only used if \code{rna.experiment=} indicates that RNA data is available.}
+
+\item{qc.igg.regex}{String containing a regular expression to identify IgG controls from the row names.
+If \code{symbol.field=} is specified, this is applied to the gene symbols instead.
+Only used if \code{adt.experiment=} indicates that ADT data is available.}
+
 \item{qc.num.mads}{Integer specifying the number of median absolute deviations (MADs) with which to define a quality control (QC) filtering threshold.
 Smaller values increase the stringency of the filter.}
 
@@ -62,7 +77,7 @@ If \code{FALSE}, low-quality cells are identified but not removed prior to furth
 
 \item{num.hvgs}{Integer specifying the number of highly variable genes (HVGs) to retain for downstream analyses.
 More HVGs capture more biological signal at the cost of capturing more technical noise and increasing computational work.
-Only relevant if \code{rna.experiment=} indicates that RNA data is available.}
+Only used if \code{rna.experiment=} indicates that RNA data is available.}
 
 \item{num.pcs}{Integer specifying the number of top principal components (PCs) to retain for downstream analyses.
 More PCs capture more biological signal at the cost of capturing more technical noise and increasing computational work.}

@@ -82,7 +82,23 @@ If mitochondrial genes are present, we use them as a control subset.
 High mitochondrial proportions are indicators of cell damage as cytoplasmic transcripts leak out of the cell.
 
 ```{r}
-:BEGIN define-mito
+:BEGIN define-mito-from-ranges
+is.mito <- local({
+    rr <- SummarizedExperiment::rowRanges(<%= RNA_SE %>)
+    mito.names <- <%= MITO_SEQNAMES %>
+    mito <- !is.na(S4Vectors::match(Seqinfo::seqnames(rr), mito.names))
+    if (is(rr, 'GenomicRanges')) {
+        BiocGenerics::which(mito)
+    } else {
+        any(mito)
+    }
+})
+:END
+:BEGIN define-mito-from-rownames
+is.mito <- grepl(<%= MITO_REGEX %>, rownames(<%= RNA_SE %>))
+:END
+:BEGIN define-mito-from-symbols
+is.mito <- grepl(<%= MITO_REGEX %>, SummarizedExperiment::rowData(<%= RNA_SE %>)[,<%= SYMBOL_FIELD %>])
 :END
 summary(is.mito)
 
@@ -140,7 +156,12 @@ We use the IgG tags as the subset of control features if they are available.
 High IgG counts are indicators of non-specific antibody aggregates. 
 
 ```{r}
-is.igg <- grepl("IgG", rownames(<%= ADT_SE %>))
+:BEGIN define-igg-from-rownames
+is.igg <- grepl(<%= IGG_REGEX %>, rownames(<%= ADT_SE %>))
+:END
+:BEGIN define-igg-from-symbols
+is.igg <- grepl(<%= IGG_REGEX %>, SummarizedExperiment::rowData(<%= ADT_SE %>)[,<%= SYMBOL_FIELD %>])
+:END
 summary(is.igg)
 
 <%= ADT_SE %> <- scrapper::quickAdtQc.se(

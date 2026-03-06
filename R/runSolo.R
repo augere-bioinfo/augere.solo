@@ -14,13 +14,22 @@
 #' If \code{FALSE} or \code{NULL}, it is assumed that no ADT data is available.
 #' @param subset.factor String specifying the name of the \code{\link[SummarizedExperiment]{colData}(se)} column containing a factor with which to subset the cells.
 #' @param subset.levels Vector containing the subset of levels to retain in the factor specified by \code{subset.factor}.
+#' @param qc.mito.regex String containing a regular expression to identify mitochondrial genes from the row names.
+#' If \code{symbol.field=} is specified, this is applied to the gene symbols instead.
+#' If \code{NULL}, the mitochondrial genes are identified from the sequence names of \code{\link[SummarizedExperiment]{rowRanges}} matching \code{qc.mito.seqnames}. 
+#' Only used if \code{rna.experiment=} indicates that RNA data is available.
+#' @param qc.mito.seqnames Character vector containing the sequence names of the mitochondrial chromosome.
+#' Only used if \code{rna.experiment=} indicates that RNA data is available and \code{qc.mito.regex=} is not specified. 
+#' @param qc.igg.regex String containing a regular expression to identify IgG controls from the row names.
+#' If \code{symbol.field=} is specified, this is applied to the gene symbols instead.
+#' Only used if \code{adt.experiment=} indicates that ADT data is available.
 #' @param qc.num.mads Integer specifying the number of median absolute deviations (MADs) with which to define a quality control (QC) filtering threshold.
 #' Smaller values increase the stringency of the filter.
 #' @param qc.filter Boolean indicating whether putative low-quality cells should be removed.
 #' If \code{FALSE}, low-quality cells are identified but not removed prior to further cells.
 #' @param num.hvgs Integer specifying the number of highly variable genes (HVGs) to retain for downstream analyses.
 #' More HVGs capture more biological signal at the cost of capturing more technical noise and increasing computational work.
-#' Only relevant if \code{rna.experiment=} indicates that RNA data is available.
+#' Only used if \code{rna.experiment=} indicates that RNA data is available.
 #' @param num.pcs Integer specifying the number of top principal components (PCs) to retain for downstream analyses.
 #' More PCs capture more biological signal at the cost of capturing more technical noise and increasing computational work.
 #' @param cluster.method Character vector specifying the clustering methods to run on the top PCs,
@@ -138,6 +147,9 @@ runSolo <- function(
     adt.experiment = NULL,
     subset.factor = NULL, 
     subset.levels = NULL,
+    qc.mito.seqnames = c("MT", "M", "chrM", "chrMT"),
+    qc.mito.regex = NULL,
+    qc.igg.regex = "IgG|igg|IGG",
     qc.num.mads = 3, 
     qc.filter = TRUE, 
     num.hvgs = 2000, 
@@ -310,32 +322,52 @@ runSolo <- function(
     #######################
 
     if (use.rna) {
-        rna.metrics.parsed <- parsed[["rna-qc-metrics"]]
-        rna.metrics.parsed[["define-mito"]] <- .define_mito_rows_code(rna.obj)
-        parsed[["rna-qc-metrics"]] <- replacePlaceholders(
-            rna.metrics.parsed,
-            list(
-                RNA_SE = rna.obj,
-                NUM_MADS = deparseToString(qc.num.mads),
-                ASSAY = deparseToString(assay),
-                NUM_THREADS = num.threads
-            )
+        rna.qc.replacements <- list(
+            RNA_SE = rna.obj,
+            NUM_MADS = deparseToString(qc.num.mads),
+            ASSAY = deparseToString(assay),
+            NUM_THREADS = num.threads
         )
+
+        rna.metrics.parsed <- parsed[["rna-qc-metrics"]]
+        if (is.null(qc.mito.regex)) {
+            rna.qc.replacements$MITO_SEQNAMES <- deparseToString(qc.mito.seqnames)
+            rna.metrics.parsed[["define-mito-from-rownames"]] <- NULL
+            rna.metrics.parsed[["define-mito-from-symbols"]] <- NULL
+        } else {
+            rna.metrics.parsed[["define-mito-from-ranges"]] <- NULL
+            rna.qc.replacements$MITO_REGEX <- deparseToString(qc.mito.regex)
+            if (is.null(symbol.field)) {
+                rna.metrics.parsed[["define-mito-from-symbols"]] <- NULL
+            } else {
+                rna.metrics.parsed[["define-mito-from-rownames"]] <- NULL
+                rna.qc.replacements$SYMBOL_FIELD <- deparseToString(symbol.field)
+            }
+        }
+
+        parsed[["rna-qc-metrics"]] <- replacePlaceholders(rna.metrics.parsed, rna.qc.replacements)
     } else {
         parsed[["rna-qc-metrics"]] <- NULL
     }
 
     if (use.adt) {
-        adt.metrics.parsed <- parsed[["adt-qc-metrics"]]
-        parsed[["adt-qc-metrics"]] <- replacePlaceholders(
-            adt.metrics.parsed,
-            list(
-                ADT_SE = adt.obj,
-                NUM_MADS = deparseToString(qc.num.mads),
-                ASSAY = deparseToString(assay),
-                NUM_THREADS = num.threads
-            )
+        adt.qc.replacements <- list(
+            ADT_SE = adt.obj,
+            IGG_REGEX = deparseToString(qc.igg.regex),
+            NUM_MADS = deparseToString(qc.num.mads),
+            ASSAY = deparseToString(assay),
+            NUM_THREADS = num.threads
         )
+
+        adt.metrics.parsed <- parsed[["adt-qc-metrics"]]
+        if (is.null(symbol.field)) {
+            adt.metrics.parsed[["define-igg-from-symbols"]] <- NULL
+        } else {
+            adt.metrics.parsed[["define-igg-from-rownames"]] <- NULL
+            adt.qc.replacements$SYMBOL_FIELD <- deparseToString(symbol.field)
+        }
+
+        parsed[["adt-qc-metrics"]] <- replacePlaceholders(adt.metrics.parsed, adt.qc.replacements)
     } else {
         parsed[["adt-qc-metrics"]] <- NULL
     }
