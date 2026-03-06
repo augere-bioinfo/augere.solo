@@ -142,7 +142,7 @@ runSolo <- function(
     qc.filter = TRUE, 
     num.hvgs = 2000, 
     num.pcs = 25,
-    cluster.method = c('graph', 'kmeans'),
+    cluster.method = 'graph',
     cluster.kmeans.k = 10,
     cluster.graph.method = c("multilevel", "leiden", "walktrap"),
     cluster.graph.num.neighbors = 10, 
@@ -181,23 +181,31 @@ runSolo <- function(
     ### Setting up ###
     ##################
 
+    .map_feature_type <- function(modality) {
+        if (modality == "RNA" || modality == "rna") {
+            "gene"
+        } else {
+            "tag"
+        }
+    }
+
     rna.obj <- adt.obj <- NULL
-    main.info <- NULL
+    main.modality <- NULL
     if (isTRUE(rna.experiment)) {
-        main.info <- c("gene", "RNA")
+        main.modality <- "RNA"
         rna.obj <- "sce"
     } else if (isTRUE(adt.experiment)) {
-        main.info <- c("tag", "ADT")
+        main.modality <- "ADT"
         adt.obj <- "sce"
     }
-    if (is.null(main.info)) {
+    if (is.null(main.modality)) {
         parsed[["mainexp-text"]] <- NULL
     } else {
         parsed[["mainexp-text"]] <- replacePlaceholders(
             parsed[["mainexp-text"]],
             list(
-                MAIN_FEATURE_TYPE = main.info[1],
-                MAIN_MODALITY = main.info[2] 
+                MAIN_FEATURE_TYPE = .map_feature_type(main.modality[1]),
+                MAIN_MODALITY = main.modality 
 
             )
         )
@@ -212,7 +220,7 @@ runSolo <- function(
             parsed[["altexp-text"]],
             list(
                 ALTEXP_SE = rna.experiment,
-                ALTEXP_FEATURE_TYPE = "gene",
+                ALTEXP_FEATURE_TYPE = .map_feature_type("RNA"),
                 ALTEXP_MODALITY = "RNA"
             )
         )
@@ -225,7 +233,7 @@ runSolo <- function(
             parsed[["altexp-text"]],
             list(
                 ALTEXP_SE = adt.experiment,
-                ALTEXP_FEATURE_TYPE = "tag",
+                ALTEXP_FEATURE_TYPE = .map_feature_type("ADT"),
                 ALTEXP_MODALITY = "ADT"
             )
         )
@@ -275,6 +283,15 @@ runSolo <- function(
         parsed[["adt-force-load"]] <- NULL
     }
 
+    force.altexp <- list()
+    for (ae in altexp.names) {
+        force.altexp[[ae]] <- replacePlaceholders(
+            parsed[["altexp-force-sce"]],
+            list(ALTEXP = deparseToString(ae))
+        )
+    }
+    parsed[["altexp-force-sce"]] <- force.altexp
+
     if (use.adt) {
         analysis.type <- "CITE-seq"
     } else {
@@ -313,7 +330,7 @@ runSolo <- function(
         parsed[["adt-qc-metrics"]] <- replacePlaceholders(
             adt.metrics.parsed,
             list(
-                RNA_SE = adt.obj,
+                ADT_SE = adt.obj,
                 NUM_MADS = deparseToString(qc.num.mads),
                 ASSAY = deparseToString(assay),
                 NUM_THREADS = num.threads
@@ -361,7 +378,8 @@ runSolo <- function(
             parsed[["adt-norm"]],
             list(
                 ADT_SE = adt.obj,
-                ASSAY = deparseToString(assay)
+                ASSAY = deparseToString(assay),
+                NUM_THREADS = num.threads
             )
         )
     } else {
@@ -382,7 +400,7 @@ runSolo <- function(
             parsed[["rna-hvg"]],
             list(
                 RNA_SE = rna.obj,
-                TOP_HVGS = deparseToString(num.hvgs),
+                TOP_HVGS = num.hvgs,
                 NUM_THREADS = num.threads,
                 HVG_SYMBOL_FIELD = symbol.name
             )
@@ -423,7 +441,7 @@ runSolo <- function(
 
     if (use.adt && use.rna) {
         chosen.pcs <- "combined"
-        if (is.null(main.info)) {
+        if (is.null(main.modality)) {
             main.name <- NULL
         } else {
             main.name <- "PCA" 
@@ -432,20 +450,34 @@ runSolo <- function(
             parsed[["combined-pca"]],
             list(
                 MAIN_NAME = deparseToString(main.name),
-                ALTEXP_NAME = deparseToString(altexp.names),
+                ALTEXP_NAMES = deparseToString(altexp.names),
                 NUM_THREADS = num.threads
             )
         )
     } else {
         parsed[["combined-pca"]] <- NULL
         chosen.pcs <- "PCA"
+        if (length(altexp.names) == 1L) {
+            names(chosen.pcs) <- altexp.names
+        }
     }
 
     ##########################
     ### k-means clustering ###
     ##########################
 
-    cluster.method <- match.arg(cluster.method, several.ok=TRUE)
+    chosen.cluster <- NULL
+    if (length(cluster.method)) {
+        cluster.method <- match.arg(cluster.method, c("kmeans", "graph"), several.ok=TRUE)
+        if (length(cluster.method) > 0) {
+            if (cluster.method[1] == "kmeans") {
+                chosen.cluster <- "kmeans.cluster"
+            } else {
+                chosen.cluster <- "graph.cluster"
+            }
+        }
+    }
+
     if ("kmeans" %in% cluster.method) {
         parsed[["cluster-kmeans"]] <- replacePlaceholders(
             parsed[["cluster-kmeans"]],
@@ -468,8 +500,6 @@ runSolo <- function(
         CHOSEN_PCS = deparseToString(chosen.pcs),
         NUM_THREADS = num.threads
     )
-    graph.in.use <- FALSE 
-    plot.in.use <- FALSE
 
     if ("graph" %in% cluster.method) {
         cluster.graph.method <- match.arg(cluster.graph.method)
@@ -486,17 +516,21 @@ runSolo <- function(
         parsed.nn[["cluster-graph"]] <- NULL 
         nn.replacements$BUILD_SNN_GRAPH_ARGS <- "NULL"
         nn.replacements$CLUSTER_GRAPH_ARGS <- "NULL"
+        graph.in.use <- FALSE 
     }
 
     parsed.plot <- parsed.nn[["plot-any"]]
-    colour.by.choice <- ""
-    if (length(cluster.method) > 0) {
-        if (cluster.method[1] == "kmeans") {
-            chosen.cluster <- "kmeans.cluster"
-        } else {
-            chosen.cluster <- "graph.cluster"
-        }
+    if (is.null(chosen.cluster)) {
+        colour.by.choice <- ""
+    } else {
         colour.by.choice <- sprintf(", colour_by = %s", deparseToString(chosen.cluster))
+    }
+
+    if (length(reduced.dimensions)) {
+        reduced.dimensions <- match.arg(reduced.dimensions, several.ok=TRUE)
+        plot.in.use <- TRUE
+    } else {
+        plot.in.use <- FALSE
     }
 
     if ("tsne" %in% reduced.dimensions) {
@@ -505,7 +539,6 @@ runSolo <- function(
             parsed.plot[["plot-tsne"]],
             list(COLOUR_BY_CLUSTER_CHOICE = colour.by.choice)
         )
-        plot.in.use <- TRUE
     } else {
         parsed.plot[["plot-tsne"]] <- NULL
         nn.replacements$TSNE_ARGS <- "NULL"
@@ -517,10 +550,9 @@ runSolo <- function(
             parsed.plot[["plot-umap"]],
             list(COLOUR_BY_CLUSTER_CHOICE = colour.by.choice)
         )
-        plot.in.use <- TRUE
     } else {
         parsed.plot[["plot-umap"]] <- NULL
-        clust.replacements$UMAP_ARGS <- "NULL"
+        nn.replacements$UMAP_ARGS <- "NULL"
     }
 
     if (plot.in.use) {
@@ -539,59 +571,75 @@ runSolo <- function(
     ### Markers ###
     ###############
 
-    marker.summary <- match.arg(marker.summary)
-    marker.effect.size <- match.arg(marker.effect.size)
-    marker.field <- paste0(marker.effect.size, ".", marker.summary)
+    if (is.null(chosen.cluster)) {
+        parsed[["markers"]] <- NULL
 
-    marker.config <- list()
-    if (use.rna) {
-        marker.config$RNA <- list(lower="rna", feature="gene", se=rna.obj)
-    }
-    if (use.adt) {
-        marker.config$ADT <- list(lower="adt", feature="tag", se=adt.obj)
-    }
+    } else {
+        marker.summary <- match.arg(marker.summary)
+        marker.effect.size <- match.arg(marker.effect.size)
+        marker.field <- paste0(marker.effect.size, ".", marker.summary)
 
-    parsed.markers <- parsed[["markers"]]
-    all.markers <- list()
-    for (mod in names(marker.config)) {
-        payload <- marker.config[[mod]]
-        current <- parsed.markers[["modality"]]
-
-        if (is.null(symbol.field)) {
-            current[["show-marker-symbols"]] <- NULL
-        } else {
-            current[["show-marker-symbols"]] <- replacePlaceholders(
-                current[["show-marker-symbols"]],
-                list(
-                    MARKER_PREFIX = payload$lower,
-                    SYMBOL_FIELD = deparseToString(symbol.field)
-                )
-            )
-            current[["show-marker-ids"]] <- NULL
+        marker.config <- list()
+        if (use.rna) {
+            marker.config$RNA <- list(lower="rna", feature=.map_feature_type("RNA"), se=rna.obj)
+        }
+        if (use.adt) {
+            marker.config$ADT <- list(lower="adt", feature=.map_feature_type("ADT"), se=adt.obj)
         }
 
-        more.args <- ""
         if (marker.lfc.threshold) {
             more.args <- sprintf("\n    more.marker.args = list(threshold = %s),", marker.lfc.threshold)
+        } else {
+            more.args <- ""
         }
 
-        all.markers[[mod]] <- replacePlaceholders(
-            current,
-            list(
-                MARKER_MODALITY = mod,
-                CHOSEN_CLUSTER = deparseToString(chosen.cluster),
-                MARKER_FEATURE_TYPE = payload$feature,
-                MARKER_SE = payload$se,
-                MARKER_PREFIX = payload$lower,
-                MARKER_ORDER = deparseToString(marker.field),
-                MARKER_ARGS = more.args,
-                NUM_THREADS = num.threads
-            )
+        parsed.markers <- parsed[["markers"]]
+        parsed.markers[["overview"]] <- replacePlaceholders(
+            parsed.markers[["overview"]],
+            list(CHOSEN_CLUSTER = deparseToString(chosen.cluster))
         )
-    }
 
-    parsed.markers[["modality"]] <- all.markers
-    parsed$markers <- parsed.markers
+        all.markers <- list()
+        for (mod in names(marker.config)) {
+            payload <- marker.config[[mod]]
+            current <- parsed.markers[["modality"]]
+
+            if (is.null(symbol.field)) {
+                current[["show-marker-symbols"]] <- NULL
+                current[["extra-symbol-column"]] <- NULL
+            } else {
+                current[["extra-symbol-column"]] <- replacePlaceholders(
+                    current[["extra-symbol-column"]],
+                    list(SYMBOL_FIELD = deparseToString(symbol.field))
+                )
+                current[["show-marker-symbols"]] <- replacePlaceholders(
+                    current[["show-marker-symbols"]],
+                    list(
+                        MARKER_PREFIX = payload$lower,
+                        SYMBOL_FIELD = deparseToString(symbol.field)
+                    )
+                )
+                current[["show-marker-ids"]] <- NULL
+            }
+
+            all.markers[[mod]] <- replacePlaceholders(
+                current,
+                list(
+                    MARKER_MODALITY = mod,
+                    CHOSEN_CLUSTER = deparseToString(chosen.cluster),
+                    MARKER_FEATURE_TYPE = payload$feature,
+                    MARKER_SE = payload$se,
+                    MARKER_PREFIX = payload$lower,
+                    MARKER_ORDER = deparseToString(marker.field),
+                    MARKER_ARGS = more.args,
+                    NUM_THREADS = num.threads
+                )
+            )
+        }
+
+        parsed.markers[["modality"]] <- all.markers
+        parsed$markers <- parsed.markers
+    }
 
     ##############
     ### Saving ###
@@ -607,54 +655,64 @@ runSolo <- function(
         parsed[["create-common-metadata"]] <- NULL
     }
 
-    if (!use.rna) {
-        parsed[["save-rna-qc"]] <- NULL
-        parsed[["save-rna-markers"]] <- NULL
+    parsed[["save-sce"]] <- replacePlaceholders(
+        parsed[["save-sce"]],
+        list(
+            AUTHOR = author.txt,
+            ANALYSIS_TYPE = analysis.type
+        )
+    )
+    if (merge.metadata) {
+        parsed[["save-sce"]][["no-merge-metadata"]] <- NULL
     } else {
-        parsed[["save-rna-markers"]] <- replacePlaceholders(
-            parsed[["save-rna-markers"]],
-            list(
-                AUTHOR = author.txt,
-                MARKER_ORDER = deparseToString(marker.field),
-                CHOSEN_CLUSTER = deparseToString(chosen.cluster)
-            )
-        )
-        parsed[["save-rna-qc"]] <- replacePlaceholders(
-            parsed[["save-rna-qc"]],
-            list(AUTHOR = author.txt)
-        )
-        if (merge.metadata) {
-            parsed[["save-rna-qc"]][["no-merge-metadata"]] <- NULL
-            parsed[["save-rna-markers"]][["no-merge-metadata"]] <- NULL
-        } else {
-            parsed[["save-rna-qc"]][["merge-metadata"]] <- NULL
-            parsed[["save-rna-markers"]][["merge-metadata"]] <- NULL
-        }
+        parsed[["save-sce"]][["merge-metadata"]] <- NULL
     }
 
-    if (!use.adt) {
-        parsed[["save-adt-qc"]] <- NULL
-        parsed[["save-adt-markers"]] <- NULL
-    } else {
-        parsed[["save-adt-markers"]] <- replacePlaceholders(
-            parsed[["save-adt-markers"]],
+    modalities.to.save <- c("RNA", "ADT")[c(use.rna, use.adt)]
+
+    qc.save.code <- list()
+    for (nm in modalities.to.save) {
+        current <- replacePlaceholders(
+            parsed[["save-qc-body"]],
             list(
                 AUTHOR = author.txt,
-                MARKER_ORDER = deparseToString(marker.field),
-                CHOSEN_CLUSTER = deparseToString(chosen.cluster)
+                MODALITY_NAME = nm,
+                MODALITY_LOWER = tolower(nm)
             )
         )
-        parsed[["save-adt-qc"]] <- replacePlaceholders(
-            parsed[["save-adt-qc"]],
-            list(AUTHOR = author.txt)
-        )
         if (merge.metadata) {
-            parsed[["save-adt-qc"]][["no-merge-metadata"]] <- NULL
-            parsed[["save-adt-markers"]][["no-merge-metadata"]] <- NULL
+            current[["no-merge-metadata"]] <- NULL
         } else {
-            parsed[["save-adt-qc"]][["merge-metadata"]] <- NULL
-            parsed[["save-adt-markers"]][["merge-metadata"]] <- NULL
+            current[["merge-metadata"]] <- NULL
         }
+        qc.save.code[[nm]] <- current
+    }
+    parsed[["save-qc-body"]] <- qc.save.code
+
+    if (is.null(chosen.cluster)) {
+        parsed[["save-markers"]] <- NULL
+    } else {
+        marker.save.code <- list()
+        for (nm in modalities.to.save) {
+            current <- replacePlaceholders(
+                parsed[["save-markers"]][["body"]],
+                list(
+                    AUTHOR = author.txt,
+                    MARKER_ORDER = deparseToString(marker.field),
+                    CHOSEN_CLUSTER = deparseToString(chosen.cluster),
+                    MODALITY_NAME = nm,
+                    MODALITY_FEATURE_TYPE = .map_feature_type(nm),
+                    MODALITY_LOWER = tolower(nm)
+                )
+            )
+            if (merge.metadata) {
+                current[["no-merge-metadata"]] <- NULL
+            } else {
+                current[["merge-metadata"]] <- NULL
+            }
+            marker.save.code[[nm]] <- current
+        }
+        parsed[["save-markers"]][["body"]] <- marker.save.code
     }
 
     writeRmd(parsed, file=fname)

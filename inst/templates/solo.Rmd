@@ -31,11 +31,14 @@ The alternative experiment `<%= ALTEXP_SE %>` contains <%= ALTEXP_MODALITY %> da
 se
 ```
 
-We convert `se` into a `SingleCellExperiment` if it wasn't already one.
+We convert each relevant experiment into a `SingleCellExperiment` if it wasn't already one.
 
 ```{r}
 loadNamespace("SingleCellExperiment")
 sce <- as(se, "SingleCellExperiment")
+:BEGIN altexp-force-sce
+SingleCellExperiment::altExp(sce, <%= ALTEXP %>) <- as(SingleCellExperiment::altExp(sce, <%= ALTEXP %>), "SingleCellExperiment")
+:END
 ```
 
 :BEGIN subset-data
@@ -44,8 +47,9 @@ We subset the `SummarizedExperiment` to the desired levels of a factor of intere
 ```{r}
 sub.factor <- <%= SUBSET_FACTOR %>
 sub.levels <- <%= SUBSET_LEVELS %>
-sce <- sce[,SummarizedExperiment::colData(sce)[,sub.factor] %in% sub.levels]
-summary(samp.keep)
+sub.keep <- SummarizedExperiment::colData(sce)[,sub.factor] %in% sub.levels
+sce <- sce[,sub.keep]
+summary(sub.keep)
 ```
 :END
 
@@ -147,7 +151,7 @@ summary(is.igg)
 )
 
 # Storing the unfiltered metrics in a separate DF for posterity.
-adt.qc.fields <- c("sum", "detected", "subset.sum.igg")
+adt.qc.fields <- c("sum", "detected", "subset.sum.igg", "keep")
 adt.qc.df <- SummarizedExperiment::colData(<%= ADT_SE %>)[,adt.qc.fields]
 adt.qc.df
 ```
@@ -157,7 +161,8 @@ The idea is that low-quality cells will have outlier values (in the "bad" direct
 A cell is considered to be of low quality if its number of detected tags is too small or if its IgG count is too high.
 
 ```{r}
-S4Vectors::metadata(<%= ADT_SE %>)$qc$thresholds
+thresholds <- S4Vectors::metadata(<%= ADT_SE %>)$qc$thresholds
+thresholds
 ```
 
 We can count the number of cells that would be retained according to these thresholds.
@@ -170,8 +175,7 @@ We might as well make some plots at this point.
 
 ```{r}
 scater::plotColData(<%= ADT_SE %>, y = "sum", colour_by = "keep") +
-    ggplot2::scale_y_continuous(transform = "log1p") + 
-    scater::categoricalHlines(x = NULL, y = thresholds[["sum"]])
+    ggplot2::scale_y_continuous(transform = "log1p")
 
 scater::plotColData(<%= ADT_SE %>, y = "detected", colour_by = "keep") +
     ggplot2::scale_y_continuous(transform = "log1p") +
@@ -247,7 +251,8 @@ Such spikes are not uncommon due to the binary nature of many surface targets.
 ```{r}
 <%= ADT_SE %> <- scrapper::normalizeAdtCounts.se(
     <%= ADT_SE %>,
-    assay.type = <%= ASSAY %>
+    assay.type = <%= ASSAY %>,
+    num.threads = <%= NUM_THREADS %>
 )
 summary(BiocGenerics::sizeFactors(<%= ADT_SE %>))
 ```
@@ -321,13 +326,13 @@ This enriches for biological variation while reducing compute time.
     number = <%= TOP_PCS %>, 
     num.threads=<%= NUM_THREADS %>
 )
-dim(reducedDim(<%= RNA_SE %>, "PCA"))
+dim(SingleCellExperiment::reducedDim(<%= RNA_SE %>, "PCA"))
 ```
 
 Let's have a look at the percentage of variance explained for each successive PC:
 
 ```{r}
-rna.pca.info <- metadata(<%= RNA_SE %>)$PCA
+rna.pca.info <- S4Vectors::metadata(<%= RNA_SE %>)$PCA
 rna.prop.exp <- rna.pca.info$variance.explained / rna.pca.info$total.variance * 100
 plot(cumsum(rna.prop.exp), ylab="Variance explained (%)", xlab="PC number", type="b")
 ```
@@ -342,19 +347,19 @@ there are usually much fewer tags than genes, and sometimes fewer tags than the 
 in which case the PCA is just a rotation of the input data.
 
 ```{r}
-adt.pca <- scrapper::runPca.se(
+<%= ADT_SE %> <- scrapper::runPca.se(
     <%= ADT_SE %>,
     features = NULL,
     number = <%= TOP_PCS %>, 
     num.threads = <%= NUM_THREADS %>
 )
-dim(reducedDim(<%= ADT_SE %>, "PCA"))
+dim(SingleCellExperiment::reducedDim(<%= ADT_SE %>, "PCA"))
 ```
 
 Let's have a look at the percentage of variance explained for each successive PC:
 
 ```{r}
-adt.pca.info <- metadata(<%= ADT_SE %>)$PCA
+adt.pca.info <- S4Vectors::metadata(<%= ADT_SE %>)$PCA
 adt.prop.exp <- adt.pca.info$variance.explained / adt.pca.info$total.variance * 100
 plot(cumsum(adt.prop.exp), ylab="Variance explained (%)", xlab="PC number", type="b")
 ```
@@ -368,21 +373,21 @@ This involves scaling each matrix so that each modality has a comparable level o
 and then combining those matrices together.
 
 ```{r}
-altexp.to.combine <- <%= ALTEXP_NAMES %>
+altexps.to.combine <- <%= ALTEXP_NAMES %>
 sce <- scrapper::scaleByNeighbors.se(
     sce,
     main.reddims = <%= MAIN_NAME %>,
     altexp.reddims = setNames(rep("PCA", length(altexps.to.combine)), altexps.to.combine),
     num.threads = <%= NUM_THREADS %>
 )
-dim(reducedDim(sce, "combined"))
+dim(SingleCellExperiment::reducedDim(sce, "combined"))
 ```
 
 We can also look at the scaling factors for each modality.
 A larger value indicates that the corresponding modality's PCs were up-scaled more than the other modalities. 
 
 ```{r}
-metadata(sce)$combined
+S4Vectors::metadata(sce)$combined
 ```
 :END
 
@@ -463,10 +468,16 @@ scater::plotReducedDim(sce, "UMAP"<%= COLOUR_BY_CLUSTER_CHOICE %>)
 :BEGIN markers
 # Marker detection
 
+:BEGIN overview
 For each modality, we create a ranking of marker features for each cluster.
 Specifically, we compute effect sizes (e.g., Cohen's $d$, AUC) from pairwise comparisons between clusters.
 Then, for each cluster, we summarize the effect sizes into a variety of statistics (e.g., mean, median) that can be used for ranking potential markers. 
 Different combinations of effect sizes and summary statistics yield rankings that focus on different types of markers.
+
+```{r}
+chosen.clusters <- SummarizedExperiment::colData(sce)[[<%= CHOSEN_CLUSTER %>]]
+```
+:END
 
 :BEGIN modality
 ## For <%= MARKER_MODALITY %> {.tabset}
@@ -476,8 +487,11 @@ We compute marker statistics for each <%= MARKER_FEATURE_TYPE %>.
 ```{r}
 <%= MARKER_PREFIX %>.markers <- scrapper::scoreMarkers.se(
     <%= MARKER_SE %>,
-    SummarizedExperiment::colData(sce)[[<%= CHOSEN_CLUSTER %>]],<%= MARKER_ARGS %>
+    chosen.clusters,<%= MARKER_ARGS %>
     order.by = <%= MARKER_ORDER %>,
+:BEGIN extra-symbol-column
+    extra.columns = <%= SYMBOL_FIELD %>,
+:END
     num.threads = <%= NUM_THREADS %>
 )
 names(<%= MARKER_PREFIX %>.markers)
@@ -496,11 +510,11 @@ for (n in names(<%= MARKER_PREFIX %>.markers)) {
     cat("\n\n### ", n, " {-}\n")
     scater::plotGroupedHeatmap(
         <%= MARKER_SE %>,
-        group = <%= CHOSEN_CLUSTER %>,
+        group = data.frame(cluster = chosen.clusters),
         center = TRUE,
         main = paste('Cluster', n),
 :BEGIN show-marker-symbols
-        features = head(MARKER_PREFIX %>.markers[[n]][[<%= SYMBOL_FIELD %>]], 20),
+        features = head(<%= MARKER_PREFIX %>.markers[[n]][[<%= SYMBOL_FIELD %>]], 20),
         swap_rownames = <%= SYMBOL_FIELD %>,
 :END
 :BEGIN show-marker-ids
@@ -533,6 +547,7 @@ common.meta <- <%= COMMON_METADATA %>
 
 We save our `SingleCellExperiment` object containing most of our results:
 
+:BEGIN save-sce
 ```{r save-sce}
 sce.meta <- list(
     title = "SingleCellExperiment for a simple <%= ANALYSIS_TYPE %> analysis",
@@ -541,7 +556,7 @@ sce.meta <- list(
 )
 
 augere.core::saveResult(
-    normalized,
+    sce,
     file.path(result.dir, "sce"), 
 :BEGIN merge-metadata
     metadata=c(common.meta, sce.meta)
@@ -551,57 +566,39 @@ augere.core::saveResult(
 :END
 )
 ```
+:END
 
 Saving the `DataFrame`s of QC statistics for each modality:
 
 ```{r save-qc}
-:BEGIN save-rna-qc
-rna.qc.meta <- list(
-    title = "Quality control metrics for RNA data",
+:BEGIN save-qc-body
+<%= MODALITY_LOWER %>.qc.meta <- list(
+    title = "Quality control metrics for <%= MODALITY_NAME %> data",
     authors = <%= AUTHOR %>,
     type = "data_frame"
 )
-
 augere.core::saveResult(
-    rna.qc.df,
-    file.path(result.dir, "qc-rna"),
+    <%= MODALITY_LOWER %>.qc.df,
+    file.path(result.dir, "qc-<%= MODALITY_LOWER %>"),
 :BEGIN merge-metadata
-    metadata=c(common.meta, rna.qc.meta)
+    metadata=c(common.meta, <%= MODALITY_LOWER %>.qc.meta)
 :END
 :BEGIN no-merge-metadata
-    metadata=rna.qc.meta
-:END
-)
-:END
-
-:BEGIN save-adt-qc
-adt.qc.meta <- list(
-    title = "Quality control metrics for ADT data",
-    authors = <%= AUTHOR %>,
-    type = "data_frame"
-)
-
-augere.core::saveResult(
-    adt.qc.df,
-    file.path(result.dir, "qc-adt"),
-:BEGIN merge-metadata
-    metadata=c(common.meta, adt.qc.meta)
-:END
-:BEGIN no-merge-metadata
-    metadata=adt.qc.meta
+    metadata = <%=MODALITY_LOWER %>.qc.meta
 :END
 )
 :END
 ```
 
+:BEGIN save-markers
 Finally, we store the marker rankings for each cluster.
 
 ```{r save-markers}
-:BEGIN save-rna-markers
-dir.create(file.path(result.dir, "markers-rna"))
-for (i in names(rna.markers)) {
-    rna.marker.metadata <- list(
-        title = sprintf("Marker genes for cluster %s", i),
+:BEGIN body
+dir.create(file.path(result.dir, "markers-<%= MODALITY_LOWER %>"))
+for (i in names(<%= MODALITY_LOWER %>.markers)) {
+    <%= MODALITY_LOWER %>.marker.meta <- list(
+        title = sprintf("Marker <%= MODALITY_FEATURE_TYPE %> for cluster %s", i),
         authors = <%= AUTHOR %>,
         type = "marker_gene_detection",
         marker_gene_detection=list(
@@ -612,45 +609,19 @@ for (i in names(rna.markers)) {
     )
 
     augere.core::saveResult(
-        rna.markers[[i]],
-        file.path(result.dir, "markers-rna", i),
+        <%= MODALITY_LOWER %>.markers[[i]],
+        file.path(result.dir, "markers-<%= MODALITY_LOWER %>", i),
 :BEGIN merge-metadata
-        metadata=c(common.meta, rna.marker.meta)
+        metadata=c(common.meta, <%= MODALITY_LOWER %>.marker.meta)
 :END
 :BEGIN no-merge-metadata
-        metadata=rna.marker.meta
-:END
-    )
-}
-:END
-
-:BEGIN save-adt-markers
-dir.create(file.path(result.dir, "markers-adt"))
-for (i in names(adt.markers)) {
-    adt.marker.meta <- list(
-        title=sprintf("Marker tags for cluster %s", i),
-        authors = <%= AUTHOR %>,
-        type = "marker_gene_detection",
-        marker_gene_detection = list(
-            group = i, 
-            order = <%= MARKER_ORDER %>, 
-            factor = <%= CHOSEN_CLUSTER %>
-        )
-    )
-
-    augere.core::saveResult(
-        rna.markers[[i]],
-        file.path(result.dir, "markers-rna", i),
-:BEGIN merge-metadata
-        metadata=c(common.meta, adt.marker.meta)
-:END
-:BEGIN no-merge-metadata
-        metadata=adt.marker.meta
+        metadata=<%= MODALITY_LOWER %>.marker.meta
 :END
     )
 }
 :END
 ```
+:END
 
 # Session information {-}
 
