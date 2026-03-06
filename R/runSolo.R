@@ -130,7 +130,7 @@
 #'
 #' # Running the pipeline; omitting the save for speed here.
 #' tmp <- tempfile()
-#' output <- runSolo(se, output=tmp, save.results=FALSE)
+#' output <- runSolo(se, qc.mito.regex="^mt-", output.dir=tmp, save.results=FALSE)
 #'
 #' # Checking the outputs.
 #' list.files(tmp, recursive=TRUE)

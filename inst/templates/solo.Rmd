@@ -306,7 +306,7 @@ The idea is to only use the HVGs in downstream analyses to enrich for biological
     more.var.args = list(use.min.width = TRUE)
 )
 
-rna.hvg.fields <- c(<%= HVG_SYMBOL_FIELD %>"means", "variances", "fitted", "residuals")
+rna.hvg.fields <- c(<%= HVG_SYMBOL_FIELD %>"means", "variances", "fitted", "residuals", "hvg")
 rna.hvg.df <- SummarizedExperiment::rowData(<%= RNA_SE %>)[,rna.hvg.fields]
 ```
 
@@ -316,7 +316,7 @@ We set a minimum width on the trend-fitting window to mitigate imbalances in the
 ```{r}
 fun <- approxfun(x = rna.hvg.df$means, y = rna.hvg.df$fitted, ties=mean)
 scater::plotRowData(<%= RNA_SE %>, x = "means", y = "variances", colour_by="hvg") +
-    ggplot2::geom_function(fun = fun, colour = "dodgerblue")
+    ggplot2::geom_function(fun = fun, colour = "red", lty=2)
 ```
 
 We then define the highly variable genes as those with the largest residuals.
