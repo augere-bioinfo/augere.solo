@@ -177,7 +177,7 @@ runSolo <- function(
     assay = 1,
     symbol.field = NULL,
     metadata = NULL,
-    output.dir = "simple", 
+    output.dir = "solo", 
     author = NULL,
     dry.run = FALSE, 
     save.results = TRUE, 
