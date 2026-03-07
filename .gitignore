@@ -1,2 +1,5 @@
 *.swp
 *.html
+*.rds
+tests/testthat/solo/
+tests/testthat/_problems/
