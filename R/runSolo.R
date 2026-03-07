@@ -14,6 +14,7 @@
 #' If \code{FALSE} or \code{NULL}, it is assumed that no ADT data is available.
 #' @param subset.factor String specifying the name of the \code{\link[SummarizedExperiment]{colData}(se)} column containing a factor with which to subset the cells.
 #' @param subset.levels Vector containing the subset of levels to retain in the factor specified by \code{subset.factor}.
+#' @param block.field String specifying the name of the \code{\link[SummarizedExperiment]{colData}(se)} column containing the block assignment for each cell.
 #' @param qc.mito.regex String containing a regular expression to identify mitochondrial genes from the row names.
 #' If \code{symbol.field=} is specified, this is applied to the gene symbols instead.
 #' If \code{NULL}, the mitochondrial genes are identified from the sequence names of \code{\link[SummarizedExperiment]{rowRanges}} matching \code{qc.mito.seqnames}. 
@@ -32,6 +33,10 @@
 #' Only used if \code{rna.experiment=} indicates that RNA data is available.
 #' @param num.pcs Integer specifying the number of top principal components (PCs) to retain for downstream analyses.
 #' More PCs capture more biological signal at the cost of capturing more technical noise and increasing computational work.
+#' @param mnn.num.neighbors Integer specifying the number of neighbors for batch correction with mutual nearest neighbors.
+#' Larger values improve stability but reduce resolution for rare subpopulations.
+#' @param mnn.num.steps Integer specifying the number of steps for the center of mass calculation during batch correction with mutual nearest neighbors.
+#' Larger values improve intermingling of cells from different batches but increase the risk of merging the wrong subpopulations.
 #' @param cluster.method Character vector specifying the clustering methods to run on the top PCs,
 #' namely graph-based clustering (\code{"graph"}) or k-means clustering (\code{"kmeans"}).
 #' Multiple methods may be specified here to generate multiple clusterings, but only the clusters from the first method are used for marker detection.
@@ -147,6 +152,7 @@ runSolo <- function(
     adt.experiment = NULL,
     subset.factor = NULL, 
     subset.levels = NULL,
+    block.field = NULL,
     qc.mito.seqnames = c("MT", "M", "chrM", "chrMT"),
     qc.mito.regex = NULL,
     qc.igg.regex = "IgG|igg|IGG",
@@ -154,6 +160,8 @@ runSolo <- function(
     qc.filter = TRUE, 
     num.hvgs = 2000, 
     num.pcs = 25,
+    mnn.num.neighbors = 15,
+    mnn.num.steps = 1,
     cluster.method = 'graph',
     cluster.kmeans.k = 10,
     cluster.graph.method = c("multilevel", "leiden", "walktrap"),
@@ -271,6 +279,15 @@ runSolo <- function(
         parsed[["subset-data"]] <- NULL
     }
 
+    if (!is.null(block.field)) {
+        parsed[["block-setup"]] <- replacePlaceholders(
+            parsed[["block-setup"]],
+            list(BLOCK = deparseToString(block.field))
+        )
+    } else {
+        parsed[["block-setup"]] <- NULL
+    }
+
     if (use.rna) {
         parsed[["rna-force-load"]] <- replacePlaceholders(
             parsed[["rna-force-load"]],
@@ -345,6 +362,15 @@ runSolo <- function(
             }
         }
 
+        if (!is.null(block.field)) {
+            rna.qc.replacements$BLOCK <- deparseToString(block.field)
+            rna.metrics.parsed[["plot-simple"]] <- NULL
+        } else {
+            rna.metrics.parsed[["plot-blocked"]] <- NULL
+            rna.metrics.parsed[["block-args"]] <- NULL
+            rna.metrics.parsed[["block-text"]] <- NULL
+        }
+
         parsed[["rna-qc-metrics"]] <- replacePlaceholders(rna.metrics.parsed, rna.qc.replacements)
     } else {
         parsed[["rna-qc-metrics"]] <- NULL
@@ -367,12 +393,24 @@ runSolo <- function(
             adt.qc.replacements$SYMBOL_FIELD <- deparseToString(symbol.field)
         }
 
+        if (!is.null(block.field)) {
+            adt.qc.replacements$BLOCK <- deparseToString(block.field)
+            adt.metrics.parsed[["plot-simple"]] <- NULL
+        } else {
+            adt.metrics.parsed[["plot-blocked"]] <- NULL
+            adt.metrics.parsed[["block-args"]] <- NULL
+            adt.metrics.parsed[["block-text"]] <- NULL
+        }
+
         parsed[["adt-qc-metrics"]] <- replacePlaceholders(adt.metrics.parsed, adt.qc.replacements)
     } else {
         parsed[["adt-qc-metrics"]] <- NULL
     }
 
     if (qc.filter) {
+        filter.parsed <- parsed[["filter-qc"]]
+        filter.replacements <- list()
+
         subset.by <- character()
         if (use.rna) {
             subset.by <- c(subset.by, "rna.qc.df$keep")
@@ -380,10 +418,15 @@ runSolo <- function(
         if (use.adt) {
             subset.by <- c(subset.by, "adt.qc.df$keep")
         }
-        parsed[["filter-qc"]] <- replacePlaceholders(
-            parsed[["filter-qc"]],
-            list(QC_SUBSET = paste(subset.by, collapse=" & "))
-        )
+        filter.replacements$QC_SUBSET <- paste(subset.by, collapse=" & ")
+
+        if (!is.null(block.field)) {
+            filter.replacements$BLOCK <- deparseToString(block.field)
+        } else {
+            filter.parsed[["with-block"]] <- NULL
+        }
+
+        parsed[["filter-qc"]] <- replacePlaceholders(filter.parsed, filter.replacements)
         parsed[["no-filter-qc"]] <- NULL
     } else {
         parsed[["filter-qc"]] <- NULL
@@ -393,27 +436,47 @@ runSolo <- function(
     ### Normalization ###
     #####################
 
+    if (is.null(block.field)) {
+        parsed[["norm-block-text"]] <- NULL
+    }
+
     if (use.rna) {
-        parsed[["rna-norm"]] <- replacePlaceholders(
-            parsed[["rna-norm"]],
-            list(
-                RNA_SE = rna.obj,
-                ASSAY = deparseToString(assay)
-            )
+        norm.parsed <- parsed[["rna-norm"]]
+        norm.replacements <- list(
+            RNA_SE = rna.obj,
+            ASSAY = deparseToString(assay)
         )
+
+        if (!is.null(block.field)) {
+            norm.replacements$BLOCK <- deparseToString(block.field)
+            norm.replacements$PLOT_X <- deparseToString(block.field) 
+        } else {
+            norm.replacements$PLOT_X <- "NULL"
+            norm.parsed[["block-args"]] <- NULL
+        }
+
+        parsed[["rna-norm"]] <- replacePlaceholders(norm.parsed, norm.replacements)
     } else {
         parsed[["rna-norm"]] <- NULL
     }
 
     if (use.adt) {
-        parsed[["adt-norm"]] <- replacePlaceholders(
-            parsed[["adt-norm"]],
-            list(
-                ADT_SE = adt.obj,
-                ASSAY = deparseToString(assay),
-                NUM_THREADS = num.threads
-            )
+        norm.parsed <- parsed[["adt-norm"]]
+        norm.replacements <- list(
+            ADT_SE = adt.obj,
+            ASSAY = deparseToString(assay),
+            NUM_THREADS = num.threads
         )
+
+        if (!is.null(block.field)) {
+            norm.replacements$BLOCK <- deparseToString(block.field)
+            norm.replacements$PLOT_X <- deparseToString(block.field) 
+        } else {
+            norm.replacements$PLOT_X <- "NULL"
+            norm.parsed[["block-args"]] <- NULL
+        }
+
+        parsed[["adt-norm"]] <- replacePlaceholders(norm.parsed, norm.replacements)
     } else {
         parsed[["adt-norm"]] <- NULL
     }
@@ -423,20 +486,29 @@ runSolo <- function(
     ##########################
 
     if (use.rna) {
-        if (is.null(symbol.field)) {
-            symbol.name <- ""
-        } else {
-            symbol.name <- paste0(deparseToString(symbol.field), ", ")
-        }
-        parsed[["rna-hvg"]] <- replacePlaceholders(
-            parsed[["rna-hvg"]],
-            list(
-                RNA_SE = rna.obj,
-                TOP_HVGS = num.hvgs,
-                NUM_THREADS = num.threads,
-                HVG_SYMBOL_FIELD = symbol.name
-            )
+        hvg.parsed <- parsed[["rna-hvg"]]
+        hvg.replacements <- list(
+            RNA_SE = rna.obj,
+            TOP_HVGS = num.hvgs,
+            NUM_THREADS = num.threads
         )
+
+        if (is.null(symbol.field)) {
+            hvg.replacements$HVG_SYMBOL_FIELD <- ""
+        } else {
+            hvg.replacements$HVG_SYMBOL_FIELD <- paste0(deparseToString(symbol.field), ", ")
+        }
+
+        if (is.null(block.field)) {
+            hvg.parsed$blocked <- NULL
+            hvg.parsed[["block-args"]] <- NULL
+            hvg.parsed[["block-text"]] <- NULL
+        } else {
+            hvg.parsed$unblocked <- NULL
+            hvg.replacements$BLOCK <- deparseToString(block.field)
+        }
+
+        parsed[["rna-hvg"]] <- replacePlaceholders(hvg.parsed, hvg.replacements)
     } else {
         parsed[["rna-hvg"]] <- NULL
     }
@@ -445,28 +517,45 @@ runSolo <- function(
     ### PCA ###
     ###########
 
+    if (is.null(block.field)) {
+        parsed[["pca-block-text"]] <- NULL
+    }
+
     if (use.rna) {
-        parsed[["rna-pca"]] <- replacePlaceholders(
-            parsed[["rna-pca"]],
-            list(
-                RNA_SE = rna.obj,
-                TOP_PCS = deparseToString(num.pcs),
-                NUM_THREADS = num.threads
-            )
+        pca.parsed <- parsed[["rna-pca"]]
+        pca.replacements <- list(
+            RNA_SE = rna.obj,
+            TOP_PCS = deparseToString(num.pcs),
+            NUM_THREADS = num.threads
         )
+
+        if (is.null(block.field)) {
+            pca.parsed[["block-args"]] <- NULL
+        } else {
+            pca.replacements$BLOCK <- deparseToString(block.field)
+        }
+
+        parsed[["rna-pca"]] <- replacePlaceholders(pca.parsed, pca.replacements)
     } else {
         parsed[["rna-pca"]] <- NULL
     }
 
     if (use.adt) {
-        parsed[["adt-pca"]] <- replacePlaceholders(
-            parsed[["adt-pca"]],
-            list(
-                ADT_SE = adt.obj,
-                TOP_PCS = deparseToString(num.pcs),
-                NUM_THREADS = num.threads
-            )
+        pca.parsed <- parsed[["adt-pca"]]
+        pca.replacements <- list(
+            ADT_SE = adt.obj,
+            TOP_PCS = deparseToString(num.pcs),
+            NUM_THREADS = num.threads
         )
+
+        if (is.null(block.field)) {
+            pca.parsed[["block-args"]] <- NULL
+            pca.parsed[["block-text"]] <- NULL
+        } else {
+            pca.replacements$BLOCK <- deparseToString(block.field)
+        }
+
+        parsed[["adt-pca"]] <- replacePlaceholders(pca.parsed, pca.replacements)
     } else {
         parsed[["adt-pca"]] <- NULL
     }
@@ -478,20 +567,44 @@ runSolo <- function(
         } else {
             main.name <- "PCA" 
         }
-        parsed[["combined-pca"]] <- replacePlaceholders(
-            parsed[["combined-pca"]],
-            list(
-                MAIN_NAME = deparseToString(main.name),
-                ALTEXP_NAMES = deparseToString(altexp.names),
-                NUM_THREADS = num.threads
-            )
+
+        combine.parsed <- parsed[["combined-pca"]]
+        combine.replacements <- list(
+            MAIN_NAME = deparseToString(main.name),
+            ALTEXP_NAMES = deparseToString(altexp.names),
+            NUM_THREADS = num.threads
         )
+
+        if (is.null(block.field)) {
+            combine.parsed[["block-args"]] <- NULL
+            combine.parsed[["block-text"]] <- NULL
+        } else {
+            combine.replacements$BLOCK <- deparseToString(block.field)
+        }
+
+        parsed[["combined-pca"]] <- replacePlaceholders(combine.parsed, combine.replacements)
     } else {
         parsed[["combined-pca"]] <- NULL
         chosen.pcs <- "PCA"
         if (length(altexp.names) == 1L) {
             names(chosen.pcs) <- altexp.names
         }
+    }
+
+    if (!is.null(block.field)) {
+        parsed[["mnn"]] <- replacePlaceholders(
+            parsed[["mnn"]],
+            list(
+                BLOCK = deparseToString(block.field),
+                MNN_NUM_NEIGHBORS = mnn.num.neighbors,
+                MNN_NUM_STEPS = mnn.num.steps,
+                NUM_THREADS = num.threads,
+                CHOSEN_PCS = deparseToString(chosen.pcs)
+            )
+        )
+        chosen.pcs <- "MNN"
+    } else {
+        parsed[["mnn"]] <- NULL
     }
 
     ##########################
@@ -511,14 +624,20 @@ runSolo <- function(
     }
 
     if ("kmeans" %in% cluster.method) {
-        parsed[["cluster-kmeans"]] <- replacePlaceholders(
-            parsed[["cluster-kmeans"]],
-            list(
-                CLUSTER_KMEANS_K = cluster.kmeans.k,
-                NUM_THREADS = num.threads,
-                CHOSEN_PCS = deparseToString(chosen.pcs)
-            )
+        kmeans.parsed <- parsed[["cluster-kmeans"]]
+        kmeans.replacements <- list(
+            CLUSTER_KMEANS_K = cluster.kmeans.k,
+            NUM_THREADS = num.threads,
+            CHOSEN_PCS = deparseToString(chosen.pcs)
         )
+
+        if (is.null(block.field)) {
+            kmeans.parsed[["block"]] <- NULL
+        } else {
+            kmeans.replacements$BLOCK <- deparseToString(block.field)
+        }
+
+        parsed[["cluster-kmeans"]] <- replacePlaceholders(kmeans.parsed, kmeans.replacements)
     } else {
         parsed[["cluster-kmeans"]] <- NULL 
     }
@@ -541,9 +660,18 @@ runSolo <- function(
         } else if (cluster.graph.method == "multilevel") {
             cluster.args$multilevel.resolution <- cluster.graph.resolution
         }
+
         nn.replacements$BUILD_SNN_GRAPH_ARGS <- deparseToString(list(num.neighbors = cluster.graph.num.neighbors))
         nn.replacements$CLUSTER_GRAPH_ARGS <- deparseToString(cluster.args)
         graph.in.use <- TRUE
+
+        graph.parsed <- parsed.nn[["cluster-graph"]]
+        if (is.null(block.field)) {
+            graph.parsed[["block"]] <- NULL
+        } else {
+            nn.replacements$BLOCK <- deparseToString(block.field)
+        }
+        parsed.nn[["cluster-graph"]] <- graph.parsed
     } else {
         parsed.nn[["cluster-graph"]] <- NULL 
         nn.replacements$BUILD_SNN_GRAPH_ARGS <- "NULL"
@@ -552,10 +680,18 @@ runSolo <- function(
     }
 
     parsed.plot <- parsed.nn[["plot-any"]]
-    if (is.null(chosen.cluster)) {
-        colour.by.choice <- ""
+    if (is.null(block.field)) {
+        if (!is.null(chosen.cluster)) {
+            colour.by.choice <- sprintf(", colour_by = %s", deparseToString(chosen.cluster))
+        } else {
+            colour.by.choice <- ""
+        }
     } else {
-        colour.by.choice <- sprintf(", colour_by = %s", deparseToString(chosen.cluster))
+        if (is.null(chosen.cluster)) {
+            colour.by.choice <- sprintf(", colour_by = %s", deparseToString(block.field))
+        } else {
+            colour.by.choice <- NA
+        }
     }
 
     if (length(reduced.dimensions)) {
@@ -567,23 +703,53 @@ runSolo <- function(
 
     if ("tsne" %in% reduced.dimensions) {
         nn.replacements$TSNE_ARGS <- deparseToString(list(perplexity = tsne.perplexity))
-        parsed.plot[["plot-tsne"]] <- replacePlaceholders(
-            parsed.plot[["plot-tsne"]],
-            list(COLOUR_BY_CLUSTER_CHOICE = colour.by.choice)
-        )
+
+        if (is.null(block.field) || is.null(chosen.cluster)) {
+            parsed.plot[["tsne-simple"]] <- replacePlaceholders(
+                parsed.plot[["tsne-simple"]],
+                list(COLOUR_BY_CHOICE = colour.by.choice)
+            )
+            parsed.plot[["tsne-multi"]] <- NULL
+        } else {
+            parsed.plot[["tsne-multi"]] <- replacePlaceholders(
+                parsed.plot[["tsne-multi"]],
+                list(
+                    CHOSEN_CLUSTER = deparseToString(chosen.cluster),
+                    BLOCK = deparseToString(block.field)
+                )
+            )
+            parsed.plot[["tsne-simple"]] <- NULL
+        }
+
     } else {
-        parsed.plot[["plot-tsne"]] <- NULL
+        parsed.plot[["tsne-simple"]] <- NULL
+        parsed.plot[["tsne-multi"]] <- NULL
         nn.replacements$TSNE_ARGS <- "NULL"
     }
 
     if ("umap" %in% reduced.dimensions) {
         nn.replacements$UMAP_ARGS <- deparseToString(list(num.neighbors = umap.num.neighbors, min.dist = umap.min.dist))
-        parsed.plot[["plot-umap"]] <- replacePlaceholders(
-            parsed.plot[["plot-umap"]],
-            list(COLOUR_BY_CLUSTER_CHOICE = colour.by.choice)
-        )
+
+        if (is.null(block.field) || is.null(chosen.cluster)) {
+            parsed.plot[["umap-simple"]] <- replacePlaceholders(
+                parsed.plot[["umap-simple"]],
+                list(COLOUR_BY_CHOICE = colour.by.choice)
+            )
+            parsed.plot[["umap-multi"]] <- NULL
+        } else {
+            parsed.plot[["umap-multi"]] <- replacePlaceholders(
+                parsed.plot[["umap-multi"]],
+                list(
+                    CHOSEN_CLUSTER = deparseToString(chosen.cluster),
+                    BLOCK = deparseToString(block.field)
+                )
+            )
+            parsed.plot[["umap-simple"]] <- NULL
+        }
+
     } else {
-        parsed.plot[["plot-umap"]] <- NULL
+        parsed.plot[["umap-simple"]] <- NULL
+        parsed.plot[["umap-multi"]] <- NULL
         nn.replacements$UMAP_ARGS <- "NULL"
     }
 
@@ -630,11 +796,23 @@ runSolo <- function(
             parsed.markers[["overview"]],
             list(CHOSEN_CLUSTER = deparseToString(chosen.cluster))
         )
+        if (is.null(block.field)) {
+            parsed.markers[["overview"]][["block-text"]] <- NULL
+        }
 
         all.markers <- list()
         for (mod in names(marker.config)) {
             payload <- marker.config[[mod]]
             current <- parsed.markers[["modality"]]
+
+            if (is.null(block.field)) {
+                current[["block-args"]] <- NULL
+            } else {
+                current[["block-args"]] <- replacePlaceholders(
+                    current[["block-args"]],
+                    list(BLOCK = deparseToString(block.field))
+                )
+            }
 
             if (is.null(symbol.field)) {
                 current[["show-marker-symbols"]] <- NULL

@@ -53,6 +53,15 @@ summary(sub.keep)
 ```
 :END
 
+:BEGIN block-setup
+We identify the blocking factor from the column data.
+This defines some uninteresting factor of variation, usually a batch of origin for each cell.
+
+```{r}
+table(SummarizedExperiment::colData(sce)[,<%= BLOCK %>])
+```
+:END
+
 We also coerce each input matrix to Bioconductor's sparse format.
 This isn't strictly necessary but it avoids silent performance degradation from inefficient formats (e.g., file-backed, `dgTMatrix` objects).
 
@@ -106,6 +115,9 @@ summary(is.mito)
     <%= RNA_SE %>,
     assay.type = <%= ASSAY %>,
     subsets = list(mito = is.mito),
+:BEGIN block-args
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+:END
     more.suggest.args = list(num.mads = <%= NUM_MADS %>),
     num.threads = <%= NUM_THREADS %>
 )
@@ -119,6 +131,9 @@ rna.qc.df
 Filtering thresholds are automatically suggested for each metric using an outlier-based approach.
 The idea is that low-quality cells will have outlier values (in the "bad" direction) for one or more of the metrics.
 A cell is considered to be of low quality if its library size or number of detected features is too small, or if the mitochondrial proportion is too high.
+:BEGIN block-text
+A separate threshold is computed for each block to ensure that uninteresting differences between blocks (e.g., different sequencing depths) do not skew the thresholds.
+:END
 
 ```{r}
 thresholds <- S4Vectors::metadata(<%= RNA_SE %>)$qc$thresholds
@@ -134,17 +149,32 @@ summary(rna.qc.df$keep)
 We might as well make some plots at this point.
 
 ```{r}
+:BEGIN plot-simple
 scater::plotColData(<%= RNA_SE %>, y = "sum", colour_by = "keep") +
     ggplot2::scale_y_continuous(transform = "log1p") + 
     scater::categoricalHlines(x = NULL, y = thresholds[["sum"]])
 
 scater::plotColData(<%= RNA_SE %>, y = "detected", colour_by = "keep") +
     ggplot2::scale_y_continuous(transform = "log1p") +
-    scater::categoricalHlines(x = NULL, y = thresholds[["sum"]])
+    scater::categoricalHlines(x = NULL, y = thresholds[["detected"]])
 
 scater::plotColData(<%= RNA_SE %>, y = "subset.proportion.mito", colour_by = "keep") +
     ggplot2::scale_y_continuous(transform = "log1p") +
     scater::categoricalHlines(x = NULL, y = thresholds[["subset.proportion"]][["mito"]])
+:END
+:BEGIN plot-blocked
+scater::plotColData(<%= RNA_SE %>, x = <%= BLOCK %>, y = "sum", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") + 
+    scater::categoricalHlinesNamed(y = thresholds[["sum"]])
+
+scater::plotColData(<%= RNA_SE %>, x = <%= BLOCK %>, y = "detected", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") +
+    scater::categoricalHlinesNamed(y = thresholds[["detected"]])
+
+scater::plotColData(<%= RNA_SE %>, x = <%= BLOCK %>, y = "subset.proportion.mito", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") +
+    scater::categoricalHlinesNamed(y = thresholds[["subset.proportion"]][["mito"]])
+:END
 ```
 :END
 
@@ -168,6 +198,9 @@ summary(is.igg)
     <%= ADT_SE %>,
     assay.type = <%= ASSAY %>,
     subsets = list(igg = is.igg),
+:BEGIN block-args
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+:END
     num.threads =<%=  NUM_THREADS %>
 )
 
@@ -180,6 +213,9 @@ adt.qc.df
 Filtering thresholds are automatically suggested for each metric using an outlier-based approach.
 The idea is that low-quality cells will have outlier values (in the "bad" direction) for one or more of the metrics.
 A cell is considered to be of low quality if its number of detected tags is too small or if its IgG count is too high.
+:BEGIN block-text
+A separate threshold is computed for each block to ensure that uninteresting differences between blocks (e.g., different sequencing depths) do not skew the thresholds.
+:END
 
 ```{r}
 thresholds <- S4Vectors::metadata(<%= ADT_SE %>)$qc$thresholds
@@ -195,6 +231,7 @@ summary(adt.qc.df$keep)
 We might as well make some plots at this point.
 
 ```{r}
+:BEGIN plot-simple
 scater::plotColData(<%= ADT_SE %>, y = "sum", colour_by = "keep") +
     ggplot2::scale_y_continuous(transform = "log1p")
 
@@ -205,6 +242,19 @@ scater::plotColData(<%= ADT_SE %>, y = "detected", colour_by = "keep") +
 scater::plotColData(<%= ADT_SE %>, y = "subset.sum.igg", colour_by = "keep") +
     ggplot2::scale_y_continuous(transform = "log1p") +
     scater::categoricalHlines(x = NULL, y = thresholds[["subset.sum"]][["igg"]])
+:END
+:BEGIN plot-blocked
+scater::plotColData(<%= ADT_SE %>, x = <%= BLOCK %>, y = "sum", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p")
+
+scater::plotColData(<%= ADT_SE %>, x = <%= BLOCK %>, y = "detected", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") +
+    scater::categoricalHlinesNamed(y = thresholds[["detected"]])
+
+scater::plotColData(<%= ADT_SE %>, x = <%= BLOCK %>, y = "subset.sum.igg", colour_by = "keep") +
+    ggplot2::scale_y_continuous(transform = "log1p") +
+    scater::categoricalHlinesNamed(y = thresholds[["subset.sum"]][["igg"]])
+:END
 ```
 :END
 
@@ -216,8 +266,12 @@ This simplifies interpretation of the results as we don't have to worry as much 
 
 ```{r}
 keep <- <%= QC_SUBSET %>
-sce <- sce[,keep]
 summary(keep)
+:BEGIN with-block
+# Checking the number of cells discarded from each block.
+table(keep, SummarizedExperiment::colData(sce)[,<%= BLOCK %>])
+:END
+sce <- sce[,keep]
 ```
 :END
 
@@ -231,7 +285,12 @@ This aims to minimize the risk of removing genuine cell subpopulations.
 
 We perform scaling normalization to remove technical biases in sequencing depth, capture efficiency, etc. between cells.
 Specifically, we compute a size factor for each cell and divide that cell's counts by its factor to obtain normalized expression values.
-Removal of these biases simplifies comparisons between cells in downstream analyses. 
+Normalization removes the scaling biases and simplifies comparisons between cells in downstream analyses. 
+
+All size factors are centered to a mean of 1 so that the normalized expression values are on roughly the same scale as the input counts.
+:BEGIN norm-block-text
+If multiple blocks are present, the centering is done for the lowest-coverage block to avoid strong upscaling that inflates technical noise.
+:END
 We also log-transform so that differences in the log-normalized expression values represent log-fold changes in downstream analyses.
 
 :BEGIN rna-norm
@@ -243,15 +302,18 @@ For the RNA count matrix, we use the total sum for each cell to compute library 
 <%= RNA_SE %> <- scrapper::normalizeRnaCounts.se(
     <%= RNA_SE %>,
     size.factors = SummarizedExperiment::colData(<%= RNA_SE %>)$sum,
+:BEGIN block-args
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+:END
     assay.type = <%= ASSAY %>
 )
 summary(BiocGenerics::sizeFactors(<%= RNA_SE %>))
 ```
 
-We visualize the size factors, which are just scaled versions of the library sizes:
+We visualize the distribution of the size factors, most of which should be around 1.
 
 ```{r}
-scater::plotColData(<%= RNA_SE %>, x=NULL, y="sizeFactor") +
+scater::plotColData(<%= RNA_SE %>, x = <%= PLOT_X %>, y = "sizeFactor") +
     ggplot2::scale_y_log10()
 ```
 
@@ -273,15 +335,18 @@ Such spikes are not uncommon due to the binary nature of many surface targets.
 <%= ADT_SE %> <- scrapper::normalizeAdtCounts.se(
     <%= ADT_SE %>,
     assay.type = <%= ASSAY %>,
+:BEGIN block-args
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+:END
     num.threads = <%= NUM_THREADS %>
 )
 summary(BiocGenerics::sizeFactors(<%= ADT_SE %>))
 ```
 
-We visualize the size factors:
+We visualize the distribution of the size factors, most of which should be around 1.
 
 ```{r}
-scater::plotColData(<%= ADT_SE %>, x=NULL, y="sizeFactor") +
+scater::plotColData(<%= ADT_SE %>, x = <%= PLOT_X %>, y = "sizeFactor") +
     ggplot2::scale_y_log10()
 ```
 
@@ -302,6 +367,10 @@ The idea is to only use the HVGs in downstream analyses to enrich for biological
 <%= RNA_SE %> <- scrapper::chooseRnaHvgs.se(
     <%= RNA_SE %>,
     top = <%= TOP_HVGS %>,
+:BEGIN block-args
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+    include.per.block = TRUE,
+:END
     num.threads = <%= NUM_THREADS %>,
     more.var.args = list(use.min.width = TRUE)
 )
@@ -312,11 +381,28 @@ rna.hvg.df <- SummarizedExperiment::rowData(<%= RNA_SE %>)[,rna.hvg.fields]
 
 To model the mean-variance relationship in log-count data, we fit a mean-dependent trend to the variances of the log-expression values. 
 We set a minimum width on the trend-fitting window to mitigate imbalances in the distribution of gene abundances.
+:BEGIN block-text
+When multiple blocks are present, we fit a trend separately to the means/variances in each block and then we average all statistics across blocks.
+This accounts for a block-specific relationship and avoids absorbing uninteresting differences between blocks into the variance estimates.
+:END
 
 ```{r}
+:BEGIN unblocked
 fun <- approxfun(x = rna.hvg.df$means, y = rna.hvg.df$fitted, ties=mean)
 scater::plotRowData(<%= RNA_SE %>, x = "means", y = "variances", colour_by="hvg") +
     ggplot2::geom_function(fun = fun, colour = "red", lty=2)
+:END
+:BEGIN blocked
+baseplot <- scater::plotRowData(<%= RNA_SE %>, x = "means", y = "variances", colour_by="hvg")
+per.block.stats <- SummarizedExperiment::rowData(<%= RNA_SE %>)$per.block
+for (b in colnames(per.block.stats)) {
+    pb <- per.block.stats[,b]
+    fun <- approxfun(x = pb$means, y = pb$fitted, ties=mean)
+    baseplot <- baseplot + ggplot2::geom_function(fun = fun, colour = "red")
+}
+SummarizedExperiment::rowData(<%= RNA_SE %>)$per.block <- NULL # no need after plotting.
+baseplot
+:END
 ```
 
 We then define the highly variable genes as those with the largest residuals.
@@ -329,10 +415,13 @@ summary(rna.hvg.df$hvg)
 
 # Principal components analysis
 
-We perform PCA on the log-normalized data to obtain the top few principal components.
+We perform PCA on the log-normalized data to obtain the top few principal components that explain the most variance in our dataset.
 We use these PCs instead of the log-expression matrix in downstream steps, 
 where distances between cells in PC space approximate the distances in the original expression space.
 Focusing on the top PCs allows us to remove technical noise and reduce computational work.
+:BEGIN pca-block-text
+For datasets with multiple blocks, the PCA only considers on the variance within each block to ensure that the top PCs do not capture uninteresting differences between blocks.
+:END
 
 :BEGIN rna-pca
 ## For RNA
@@ -344,6 +433,9 @@ This enriches for biological variation while reducing compute time.
 <%= RNA_SE %> <- scrapper::runPca.se(
     <%= RNA_SE %>,
     features = SummarizedExperiment::rowData(<%= RNA_SE %>)$hvg,
+:BEGIN block-args
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+:END
     number = <%= TOP_PCS %>, 
     num.threads=<%= NUM_THREADS %>
 )
@@ -371,6 +463,9 @@ in which case the PCA is just a rotation of the input data.
 <%= ADT_SE %> <- scrapper::runPca.se(
     <%= ADT_SE %>,
     features = NULL,
+:BEGIN block-args
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+:END
     number = <%= TOP_PCS %>, 
     num.threads = <%= NUM_THREADS %>
 )
@@ -392,6 +487,9 @@ plot(cumsum(adt.prop.exp), ylab="Variance explained (%)", xlab="PC number", type
 We combine PCs from different modalities for downstream analyses. 
 This involves scaling each matrix so that each modality has a comparable level of within-population variance,
 and then combining those matrices together.
+:BEGIN block-text
+For multiple blocks, the variance is computed within each block and then averaged across blocks.
+:END
 
 ```{r}
 altexps.to.combine <- <%= ALTEXP_NAMES %>
@@ -399,16 +497,40 @@ sce <- scrapper::scaleByNeighbors.se(
     sce,
     main.reddims = <%= MAIN_NAME %>,
     altexp.reddims = setNames(rep("PCA", length(altexps.to.combine)), altexps.to.combine),
+:BEGIN block-args
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+:END
     num.threads = <%= NUM_THREADS %>
 )
 dim(SingleCellExperiment::reducedDim(sce, "combined"))
 ```
 
-We can also look at the scaling factors for each modality.
+We check out the scaling factors for each modality.
 A larger value indicates that the corresponding modality's PCs were up-scaled more than the other modalities. 
 
 ```{r}
 S4Vectors::metadata(sce)$combined
+```
+:END
+
+:BEGIN mnn
+## Batch correction
+
+We use the mutual nearest neighbors (MNN) method to remove differences between blocks in the PC space.
+This merges corresponding subpopulations across blocks to simplify downstream steps, e.g., by reducing the number of redundant clusters.
+
+```{r}
+sce <- scrapper::correctMnn.se(
+    sce,
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+    more.mnn.args = list(
+        num.neighbors = <%= MNN_NUM_NEIGHBORS %>,
+        num.steps = <%= MNN_NUM_STEPS %>
+    ),
+    reddim.type = <%= CHOSEN_PCS %>,
+    num.threads = <%= NUM_THREADS %>
+)
+dim(SingleCellExperiment::reducedDim(sce, "MNN"))
 ```
 :END
 
@@ -434,10 +556,24 @@ More typically, a large `k` is used to partition cells into many small clusters 
 ```{r}
 table(sce$kmeans.cluster)
 ```
+
+:BEGIN block
+We examine the distribution of clusters across blocks.
+For blocks corresponding to replicate samples, we should see a more-or-less even distribution of cells across blocks within each cluster.
+
+```{r}
+scrapper::countGroupsByBlock(
+    sce$kmeans.cluster,
+    SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+    normalize.block = TRUE
+)
+```
+:END
+
 :END
 
 :BEGIN neighbor-steps
-# Graph-based clustering and visualization
+# Nearest neighbor detection
 
 Several neighbor-related steps downstream of the PCA are bundled into a single function. 
 This includes graph-based clustering, t-SNE and/or UMAP, which are run in parallel for speed.
@@ -456,7 +592,7 @@ sce <- scrapper::runAllNeighborSteps.se(
 )
 ```
 
-:BEGIN cluster-snn
+:BEGIN cluster-graph
 We use graph-based clustering to find communities of related cells.
 Specifically, we build a shared-nearest neighbors graph where the nodes are cells and edges are created between neighboring cells.
 We then apply a community detection algorithm to find groups of cells that are enriched for intra-group edges compared to inter-group edges.
@@ -464,21 +600,67 @@ We then apply a community detection algorithm to find groups of cells that are e
 ```{r}
 table(sce$graph.cluster)
 ```
+
+:BEGIN block
+We examine the distribution of clusters across blocks.
+For blocks corresponding to replicate samples, we should see a more-or-less even distribution of cells across blocks within each cluster.
+
+```{r}
+scrapper::countGroupsByBlock(
+    sce$graph.cluster,
+    SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+    normalize.block = TRUE
+)
+```
+:END
+
 :END
 
 :BEGIN plot-any
 Alright, let's get onto the _real_ business of single-cell data analysis -
 namely, to make some pretty plots to visualize our dataset.
 
-:BEGIN plot-tsne
+:BEGIN tsne-simple
 ```{r, fig.asp=1, fig.wide=TRUE}
-scater::plotReducedDim(sce, "TSNE"<%= COLOUR_BY_CLUSTER_CHOICE %>)
+scater::plotReducedDim(sce, "TSNE"<%= COLOUR_BY_CHOICE %>)
 ```
 :END
 
-:BEGIN plot-umap
+:BEGIN tsne-multi
+## $t$-stochastic neighbor embedding {.tabset}
+
+### By cluster {-}
+
 ```{r, fig.asp=1, fig.wide=TRUE}
-scater::plotReducedDim(sce, "UMAP"<%= COLOUR_BY_CLUSTER_CHOICE %>)
+scater::plotReducedDim(sce, "TSNE", colour_by = <%= CHOSEN_CLUSTER %>)
+```
+
+### By block {-}
+
+```{r, fig.asp=1, fig.wide=TRUE}
+scater::plotReducedDim(sce, "TSNE", colour_by = <%= BLOCK %>)
+```
+:END
+
+:BEGIN umap-simple
+```{r, fig.asp=1, fig.wide=TRUE}
+scater::plotReducedDim(sce, "UMAP"<%= COLOUR_BY_CHOICE %>)
+```
+:END
+
+:BEGIN umap-multi
+## Uniform manifold approximation and projection {.tabset}
+
+### By cluster {-}
+
+```{r, fig.asp=1, fig.wide=TRUE}
+scater::plotReducedDim(sce, "UMAP", colour_by = <%= CHOSEN_CLUSTER %>)
+```
+
+### By block {-}
+
+```{r, fig.asp=1, fig.wide=TRUE}
+scater::plotReducedDim(sce, "UMAP", colour_by = <%= BLOCK %>)
 ```
 :END
 
@@ -498,6 +680,11 @@ Different combinations of effect sizes and summary statistics yield rankings tha
 ```{r}
 chosen.clusters <- SummarizedExperiment::colData(sce)[[<%= CHOSEN_CLUSTER %>]]
 ```
+
+:BEGIN block-text
+In the presence of multiple blocks, we compute effect sizes between groups within each block and then average them across blocks.
+This ensures that uninteresting differences between blocks do not inflate the effect sizes.
+:END
 :END
 
 :BEGIN modality
@@ -510,6 +697,9 @@ We compute marker statistics for each <%= MARKER_FEATURE_TYPE %>.
     <%= MARKER_SE %>,
     chosen.clusters,<%= MARKER_ARGS %>
     order.by = <%= MARKER_ORDER %>,
+:BEGIN block-args
+    block = SummarizedExperiment::colData(sce)[,<%= BLOCK %>],
+:END
 :BEGIN extra-symbol-column
     extra.columns = <%= SYMBOL_FIELD %>,
 :END

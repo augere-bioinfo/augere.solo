@@ -10,6 +10,7 @@ runSolo(
   adt.experiment = NULL,
   subset.factor = NULL,
   subset.levels = NULL,
+  block.field = NULL,
   qc.mito.seqnames = c("MT", "M", "chrM", "chrMT"),
   qc.mito.regex = NULL,
   qc.igg.regex = "IgG|igg|IGG",
@@ -17,6 +18,8 @@ runSolo(
   qc.filter = TRUE,
   num.hvgs = 2000,
   num.pcs = 25,
+  mnn.num.neighbors = 15,
+  mnn.num.steps = 1,
   cluster.method = "graph",
   cluster.kmeans.k = 10,
   cluster.graph.method = c("multilevel", "leiden", "walktrap"),
@@ -57,6 +60,8 @@ If \code{FALSE} or \code{NULL}, it is assumed that no ADT data is available.}
 
 \item{subset.levels}{Vector containing the subset of levels to retain in the factor specified by \code{subset.factor}.}
 
+\item{block.field}{String specifying the name of the \code{\link[SummarizedExperiment]{colData}(se)} column containing the block assignment for each cell.}
+
 \item{qc.mito.seqnames}{Character vector containing the sequence names of the mitochondrial chromosome.
 Only used if \code{rna.experiment=} indicates that RNA data is available and \code{qc.mito.regex=} is not specified.}
 
@@ -81,6 +86,12 @@ Only used if \code{rna.experiment=} indicates that RNA data is available.}
 
 \item{num.pcs}{Integer specifying the number of top principal components (PCs) to retain for downstream analyses.
 More PCs capture more biological signal at the cost of capturing more technical noise and increasing computational work.}
+
+\item{mnn.num.neighbors}{Integer specifying the number of neighbors for batch correction with mutual nearest neighbors.
+Larger values improve stability but reduce resolution for rare subpopulations.}
+
+\item{mnn.num.steps}{Integer specifying the number of steps for the center of mass calculation during batch correction with mutual nearest neighbors.
+Larger values improve intermingling of cells from different batches but increase the risk of merging the wrong subpopulations.}
 
 \item{cluster.method}{Character vector specifying the clustering methods to run on the top PCs,
 namely graph-based clustering (\code{"graph"}) or k-means clustering (\code{"kmeans"}).
