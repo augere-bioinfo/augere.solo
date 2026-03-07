@@ -23,7 +23,7 @@ test_that("runSolo works with blocking", {
 
     qc.thresh <- S4Vectors::metadata(ref$sce)$qc$thresholds
     expect_gt(length(qc.thresh$sum), 0L)
-    expect_identical(qc.thresh$block.ids, c("A", "B", "C")) 
+    expect_identical(qc.thresh$block.ids, sort(unique(se$block)))
 
     expect_identical(SummarizedExperiment::assayNames(ref$sce), c("counts", "logcounts"))
     expect_identical(SingleCellExperiment::reducedDimNames(ref$sce), c("PCA", "MNN", "TSNE", "UMAP"))
@@ -51,6 +51,16 @@ test_that("runSolo works with blocking", {
     expect_gte(length(reddim), 2L)
     expect_match(lines[reddim[1]], "PCA")
     expect_true(all(grep("MNN", lines[reddim[-1]])))
+
+    # Check that results are actually different compared to the unblocked case.
+    utmp <- tempfile()
+    unblocked <- runSolo(se, output.dir=utmp, save.results=FALSE)
+    expect_identical(ref$qc.rna[,setdiff(colnames(ref$qc.rna), "keep")], unblocked$qc.rna[,setdiff(colnames(unblocked$qc.rna), "keep")])
+    expect_false(identical(ref$markers.rna, unblocked$markers.rna))
+
+    ulines <- readLines(file.path(utmp, "report.Rmd"))
+    uhas.block <- grep("block", ulines)
+    expect_identical(length(uhas.block), 0L) # there shouldn't be any references to blocking here.
 })
 
 test_that("runSolo's kmeans behaves with blocking", {

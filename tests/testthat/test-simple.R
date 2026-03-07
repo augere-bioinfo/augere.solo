@@ -1,4 +1,4 @@
-# library(testthat); library(augere.solo); source("test-runSolo.R")
+# library(testthat); library(augere.solo); source("test-simple.R")
 
 set.seed(9999)
 ngenes <- 10000L
@@ -91,7 +91,11 @@ test_that("runSolo works with k-means", {
     kout <- runSolo(se, cluster.method="kmeans", output.dir=tmp, save.results=FALSE)
     expect_identical(names(kout$markers.rna), levels(kout$sce$kmeans.cluster))
     expect_false(identical(kout$sce$kmeans.cluster, ref$sce$graph.cluster))
-    expect_identical(SingleCellExperiment::reducedDim(kout$sce, "TSNE"), SingleCellExperiment::reducedDim(ref$sce, "TSNE")) # other NN results are unchanged.
+
+    # Other results are unchanged.
+    expect_identical(kout$qc.rna, ref$qc.rna)
+    expect_identical(SummarizedExperiment::rowData(kout$sce), SummarizedExperiment::rowData(ref$sce))
+    expect_identical(SingleCellExperiment::reducedDim(kout$sce, "TSNE"), SingleCellExperiment::reducedDim(ref$sce, "TSNE"))
 
     # We can actually use multiple methods.
     mult <- runSolo(se, cluster.method=c("kmeans", "graph"), output.dir=tmp, save.results=FALSE)
@@ -186,90 +190,4 @@ test_that("runSolo can do a dry run", {
     expect_null(output)
     fname <- file.path(tmp, "report.Rmd")
     expect_gt(length(readLines(fname)), 0L)
-})
-
-ntags <- 100L
-ay <- matrix(rpois(ntags * ncells, lambda=100), ncol=ncells)
-ase <- SummarizedExperiment::SummarizedExperiment(list(counts=ay))
-rownames(ase) <- sprintf("TAG-%s", seq_len(ntags))
-rownames(ase)[1:5] <- sprintf("IgG-%s", 1:5)
-
-test_that("runSolo works with only ADTs", {
-    tmp <- tempfile()
-    adt <- runSolo(ase, adt.experiment=TRUE, rna.experiment=NULL, output.dir=tmp, save.results=FALSE)
-
-    expect_s4_class(adt$sce, "SingleCellExperiment")
-    expect_identical(nrow(adt$sce), ntags)
-    expect_lte(ncol(adt$sce), ncells)
-
-    expect_gt(mean(adt$qc.adt$subset.sum.igg), 0)
-    expect_null(SummarizedExperiment::rowData(adt$sce)$hvg) # feature selection was skipped.
-
-    expect_identical(SingleCellExperiment::reducedDimNames(adt$sce), c("PCA", "TSNE", "UMAP"))
-    expect_true(is.factor(adt$sce$graph.cluster))
-    expect_identical(sort(rownames(adt$markers.adt[[1]])), sort(rownames(ase)))
-
-    # Still works if the ADTs are tucked into an altexp.
-    sce <- as(se, "SingleCellExperiment")
-    SingleCellExperiment::altExp(sce, "protein") <- ase
-    adt2 <- runSolo(sce, adt.experiment="protein", rna.experiment=NULL, output.dir=tmp, save.results=FALSE)
-
-    expect_identical(adt2$sce$graph.cluster, adt$sce$graph.cluster)
-    expect_identical(SingleCellExperiment::reducedDim(SingleCellExperiment::altExp(adt2$sce), "PCA"), SingleCellExperiment::reducedDim(adt$sce, "PCA"))
-    expect_identical(SingleCellExperiment::reducedDim(adt2$sce, "TSNE"), SingleCellExperiment::reducedDim(adt$sce, "TSNE"))
-    expect_identical(adt2$qc.adt, adt$qc.adt)
-    expect_identical(adt2$markers, adt$markers)
-})
-
-test_that("runSolo works with regex for IgG symbols", {
-    copy <- ase
-    tmp <- tempfile()
-    adt <- runSolo(ase, adt.experiment=TRUE, rna.experiment=NULL, reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
-
-    SummarizedExperiment::rowData(copy)$SYMBOL <- rownames(copy)
-    rownames(copy) <- sprintf("whee-%s", seq_len(nrow(copy)))
-    symb <- runSolo(copy, symbol.field="SYMBOL", adt.experiment=TRUE, rna.experiment=NULL, reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
-
-    expect_identical(adt$qc.adt$subset.sum.igg, symb$qc.adt$subset.sum.igg)
-})
-
-test_that("runSolo works with RNA plus ADTs", {
-    sce <- as(se, "SingleCellExperiment")
-    SingleCellExperiment::altExp(sce, "protein") <- ase
-
-    tmp <- tempfile()
-    combined <- runSolo(sce, adt.experiment="protein", cluster.method=c("graph", "kmeans"), output.dir=tmp, save.results=FALSE)
-
-    expect_identical(
-        ncol(SingleCellExperiment::reducedDim(combined$sce, "combined")),
-        ncol(SingleCellExperiment::reducedDim(combined$sce, "PCA")) + ncol(SingleCellExperiment::reducedDim(SingleCellExperiment::altExp(combined$sce), "PCA"))
-    )
-    expect_identical(names(combined$markers.rna), levels(combined$sce$graph.cluster))
-    expect_identical(names(combined$markers.rna), names(combined$markers.adt))
-
-    lines <- readLines(file.path(tmp, "report.Rmd"))
-    rd.lines <- lines[grep("reddim.type", lines)]
-    expect_identical(length(rd.lines), 2L) # one for k-means, one for the neighbor-related steps.
-    expect_true(all(grepl("combined", rd.lines)))
-})
-
-test_that("runSolo saves ADT data correctly", {
-    tmp <- tempfile()
-    saved <- runSolo(ase, adt.experiment=TRUE, rna.experiment=NULL, output.dir=tmp)
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "sce"))$x, "SingleCellExperiment")
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "qc-adt"))$x, "DFrame")
-    expect_false(file.exists(file.path(tmp, "results", "qc-rna")))
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "markers-adt", "1"))$x, "DFrame")
-    expect_false(file.exists(file.path(tmp, "results", "markers-rna")))
-
-    # Now saving with both RNA and ADTs together.
-    sce <- as(se, "SingleCellExperiment")
-    SingleCellExperiment::altExp(sce, "protein") <- ase
-    tmp <- tempfile()
-    combined <- runSolo(sce, adt.experiment="protein", output.dir=tmp)
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "sce"))$x, "SingleCellExperiment")
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "qc-rna"))$x, "DFrame")
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "markers-rna", "1"))$x, "DFrame")
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "qc-adt"))$x, "DFrame")
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "markers-adt", "1"))$x, "DFrame")
 })
