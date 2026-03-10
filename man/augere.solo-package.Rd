@@ -6,7 +6,7 @@
 \alias{augere.solo-package}
 \title{augere.solo: Automatic Generation of Single-Cell Analyses}
 \description{
-Implements pipelines for generating single-cell analysis reports in the augere framework. This uses scrapper to execute routine steps such as quality control, normalization, feature selection, clustering and marker detection. Each pipeline function generates a self-contained Rmarkdown report with all of the steps required to reproduce the analysis.
+Implements pipelines for generating single-cell analysis reports in the augere framework. This uses scrapper to execute routine steps such as quality control, normalization, feature selection, clustering and marker detection. We also implement a pipeline for automatic cell type annotation against a labelled reference with SingleR. Each pipeline function generates a self-contained Rmarkdown report with all of the steps required to reproduce its analysis.
 }
 \seealso{
 Useful links:

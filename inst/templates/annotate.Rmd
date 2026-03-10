@@ -1,0 +1,351 @@
+---
+title: "Automatic annotation of scRNA-seq data"
+author: <%= AUTHOR %>
+date: "`r Sys.Date()`"
+output:
+  BiocStyle::html_document:
+    toc_float: yes
+    titlecaps: false 
+  md_document:
+    preserve_yaml: yes
+---
+
+```{r preamble, echo=FALSE}
+knitr::opts_chunk$set(error=FALSE, warning=FALSE, message=FALSE)
+```
+
+# Test data loading
+
+We load the `SingleCellExperiment` object corresponding to our test dataset.
+Each row corresponds to a gene while each column corresponds to a cell.
+
+```{r}
+:BEGIN test-setup 
+:END
+test
+```
+
+:BEGIN replace-test-rownames
+We replace the row names to obtain gene identifiers that are consistent with those used in the reference dataset.
+
+```{r}
+new.test.rownames <- SummarizedExperiment::rowData(test)[,<%= ALTERNATIVE_NAMES %>]
+new.test.rownames[is.na(new.test.rownames)] <- ""
+old.test.rownames <- rownames(test)
+rownames(test) <- new.test.rownames
+head(new.test.rownames)
+```
+:END
+
+:BEGIN normalize-test
+While not technically necessary, having normalized and log-transformed test expression values is helpful for visualization, so we'll do just that.
+
+```{r}
+test <- scrapper::normalizeRnaCounts.se(
+    test,
+    assay = <%= ASSAY %>,
+:BEGIN block
+    block = SummarizedExperiment::colData(test)[,<%= BLOCK %>],
+:END
+    num.threads = <%= NUM_THREADS %>
+)
+```
+:END
+
+# Reference data loading
+
+We load one or more reference datasets to assign labels to each cell in our test dataset. 
+
+```{r}
+references <- list()
+```
+
+:BEGIN ref-body
+## Reference `<%= SHORT_NAME_RAW %>`
+
+:BEGIN celldex
+We load our reference dataset from the `r BiocStyle::Biocpkg("celldex")` package:
+
+```{r}
+ref <- celldex::<%= CELLDEX_CMD %>(<%= CELLDEX_ARGS %>)
+ref
+```
+:END
+
+:BEGIN custom
+We load our reference dataset:
+
+```{r}
+:BEGIN ref-setup
+:END
+ref
+```
+:END
+
+:BEGIN replace-rownames
+We replace the row names to obtain gene identifiers that are consistent with those used in the test dataset.
+
+```{r}
+new.rownames <- SummarizedExperiment::rowData(ref)[,<%= ALTERNATIVE_NAMES %>]
+new.rownames[is.na(new.rownames)] <- ""
+rownames(ref) <- new.rownames
+head(new.rownames)
+```
+:END
+
+Let's inspect the distribution of reference labels:
+
+```{r}
+table(SummarizedExperiment::colData(ref)[[<%= LABEL_FIELD %>]])
+```
+
+:BEGIN normalize
+For proper marker detection, the reference expression values are expected to be normalized and log-transformed.
+
+```{r}
+ref <- scrapper::normalizeRnaCounts.se(
+    ref,
+:BEGIN block
+    block = SummarizedExperiment::colData(ref)[,<%= BLOCK %>],
+:END
+    assay = <%= ASSAY %>,
+    num.threads = <%= NUM_THREADS %>
+)
+```
+:END
+
+Now adding it to our reference list.
+
+```{r}
+references[[<%= SHORT_NAME %>]] <- ref
+```
+:END
+
+:BEGIN intersect-ref
+## Finding the intersection
+
+For simplicity, we'll only consider the intersection of genes across all the test and reference datasets.
+This improves the interpretability of correlations across references as they are computed from a common set of features.
+
+```{r}
+universe <- Reduce(intersect, lapply(references, rownames))
+universe <- intersect(universe, rownames(test))
+length(universe)
+```
+:END
+
+# Annotation
+
+We annotate the test cells with the `r BiocStyle::Biocpkg("SingleR")` package.
+For each test cell, we compute Spearman correlations against the reference profiles.
+The assigned label for each test cell is the one with the largest positive correlation.
+For closely related labels, we recompute the correlations with the relevant subset of markers to improve resolution.
+We do this for each reference separately and store the results in our list:
+
+```{r}
+all.trained <- list()
+predictions <- list()
+```
+
+:BEGIN annotate-body
+## Reference `<%= SHORT_NAME_RAW %>` {.tabset}
+
+First we train a classifier from the reference data:
+
+```{r}
+ref <- references[[<%= SHORT_NAME %>]]
+trained <- SingleR::trainSingleR(
+    ref,
+    labels = SummarizedExperiment::colData(ref)[[<%= LABEL_FIELD %>]],
+    test.genes = rownames(test),
+    assay.type = <%= ASSAY_NORM_REF %>,
+    de.method = <%= DE_METHOD %>,<%= TRAIN_ARGS %>
+    check.missing = FALSE,
+    num.threads = <%= NUM_THREADS %>
+)
+all.trained[[<%= SHORT_NAME %>]] <- trained
+```
+
+And then we perform a prediction for each cell in the test dataset:
+
+```{r}
+pred <- SingleR::classifySingleR(
+    test,
+    trained,
+    assay.type = <%= ASSAY_TEST %>,
+    num.threads = <%= NUM_THREADS %>
+)
+predictions[[<%= SHORT_NAME %>]] <- pred
+pred
+```
+
+We tabulate the assignments to examine the distribution of labels in the test dataset.
+
+```{r}
+table(pred$labels)
+```
+
+We visualize the (normalized) assignment scores for each test cell. 
+Ideally, the highest scoring label should be unambiguous for each cell.
+
+```{r}
+SingleR::plotScoreHeatmap(pred, cells.order=pred$labels)
+```
+
+Another useful diagnostic is to examine the behavior of the top markers in the test dataset.
+The cells assigned to a label are expected to upregulate that label's markers.
+We should also check that the upregulated markers are biologically relevant for each label.
+
+```{r, results="asis"}
+for (lab in unique(pred$labels)) {
+    cat("\n\n##", lab, "{-}\n")
+    SingleR::plotMarkerHeatmap(
+        pred,
+        test,
+        label = lab,
+        assay.type = <%= ASSAY_NORM_TEST %>,
+:BEGIN block
+        block = SummarizedExperiment::colData(test)[,<%= BLOCK %>],
+:END
+:BEGIN old-row-names
+        display.row.names = old.test.rownames,
+:END
+:BEGIN alt-row-names
+        display.row.names = SummarizedExperiment::rowData(test)[,<%= DISPLAY_NAME_FIELD %>],
+:END
+        num.threads = <%= NUM_THREADS %> 
+    )
+}
+```
+:END
+
+:BEGIN combining
+## Combining predictions
+
+We can combine the predictions from multiple references into a single set of results. 
+For each test cell, we compute correlations to the predicted label from each reference, using the union of relevant markers from all references.
+We then assign the label from the reference with the highest correlation, possibly after some fine-tuning. 
+
+```{r}
+combined <- SingleR::combineRecomputedResults(
+    predictions,
+    test,
+    all.trained,
+    assay.type.test = <%= ASSAY_TEST %>,
+    num.threads = <%= NUM_THREADS %>
+)
+combined$orig.results <- NULL # strip these out to avoid redundancy.
+combined
+```
+
+We can see how many test cells were assigned to each reference:
+
+```{r}
+table(names(predictions)[combined$reference])
+```
+
+As well as the variety of labels across all references:
+
+```{r}
+table(combined$labels)
+```
+
+Note that there might not be much diagnostic value in comparing the scores between references.
+Multiple references may contain the same cell type, in which case ambiguous assignment of a single reference would be unavoidable.
+:END
+
+:BEGIN more-comparisons
+# More comparisons {.tabset}
+
+:BEGIN clustering
+We tabulate the assigments with respect to pre-existing clustering results.
+We expect to see some correlation between the clustering and assignments,
+though major discrepancies may be of interest if they represent some novel factor of heterogeneity that does not exist in the reference.
+
+```{r}
+tab <- table(
+    predicted = <%= TARGET %>$labels,
+    cluster = SummarizedExperiment::colData(test)[,<%= CLUSTER_FIELD %>]
+)
+pheatmap::pheatmap(log2(tab+1), colors=colorRampPalette(c('white', 'blue'))(101))
+```
+:END
+
+:BEGIN visualization
+We plot the label assignments on pre-computed dimensionality reduction results.
+
+```{r}
+for (r in reducedDimNames(test)) {
+    cat("\n\n##", r, "{-}\n")
+    scater::plotReducedDim(test, r, colour_by = <%s= TARGET %>$labels)
+}
+```
+:END
+:END
+
+# Saving results 
+
+We create a directory in which to save results.
+
+```{r save-directory}
+result.dir <- "results"
+dir.create(result.dir)
+```
+
+:BEGIN create-common-metadata
+We also set up some extra metadata to add to each result.
+
+```{r}
+common.meta <- <%= COMMON_METADATA %>
+```
+:END
+
+We then save our prediction results:
+
+```{r save-pred}
+:BEGIN save-body
+anno.meta <- list(
+    title='Cell type assignments from SingleR for reference `<%= SHORT_NAME_RAW %>`',
+    authors = <%= AUTHOR %>,
+    type="cell_label_assignment"
+)
+augere.core::saveResult(
+    predictions[[<%= SHORT_NAME %>]],
+    file.path(result.dir, <%= SAVE_PATH %>),
+:BEGIN merge-metadata
+    metadata=c(common.meta, anno.meta)
+:END
+:BEGIN no-merge-metadata
+    metadata = anno.meta
+:END
+)
+:END
+```
+
+:BEGIN save-combined
+As well as the combined results.
+
+```{r save-combined}
+anno.meta <- list(
+    title='Combined cell type assignments from SingleR', 
+    authors = <%= AUTHOR %>,
+    type="cell_label_assignment"
+)
+augere.core::saveResult(
+    combined,
+    file.path(result.dir, "combined"),
+:BEGIN merge-metadata
+    metadata=c(common.meta, anno.meta)
+:END
+:BEGIN no-merge-metadata
+    metadata = anno.meta
+:END
+)
+```
+:END
+
+# Session information {-}
+
+```{r}
+sessionInfo()
+```
