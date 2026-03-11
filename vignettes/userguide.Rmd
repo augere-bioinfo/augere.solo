@@ -1,0 +1,225 @@
+---
+title: Simple single-cell analyses
+author:
+- name: Aaron Lun
+  email: infinite.monkeys.with.keyboards@gmail.com
+date: "Revised: March 11, 2026"  
+output: BiocStyle::html_document
+package: augere.solo
+vignette: >
+  %\VignetteIndexEntry{Simple single-cell analyses}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, echo=FALSE, results="hide"}
+knitr::opts_chunk$set(error=FALSE, message=FALSE, warning=FALSE)
+self <- BiocStyle::Biocpkg("augere.solo")
+```
+
+# Overview
+
+`r self` implements [**augere** pipelines](https://github.com/augere-bioinfo) for a variety of simple single-cell analyses.
+This use `r BiocStyle::Biocpkg("scrapper")` for routine steps such as quality control, clustering and marker detection.
+We also use `r BiocStyle::Biocpkg("SingleR")` for automatic cell type annotation based on pre-labelled references.
+Each pipeline creates a self-contained Rmarkdown report that documents each step in the analysis.
+
+# Quick start
+
+To install this package, follow the usual [instructions for Bioconductor](https://bioconductor.org/install):
+
+```r
+install.packages("BiocManager") # if not already available
+BiocManager::install("augere.solo")
+```
+
+Let's load up our favorite example dataset from the `r BiocStyle::Biocpkg("scRNAseq")` package:
+
+```{r}
+library(scRNAseq)
+sce.z <- ZeiselBrainData()
+sce.z
+```
+
+Now we call `runSolo()` to perform a routine analysis of this dataset:
+
+```{r, fig.keep="none"}
+library(augere.solo)
+outdir.z <- tempfile()
+res.z <- runSolo(sce.z, qc.mito.regex = "^mt-", output.dir = outdir.z)
+```
+
+This returns a list of various results, including QC metrics, marker rankings and a `SingleCellExperiment` decorated with clusterings and reduced dimensions: 
+
+```{r}
+# Checking out the QC statistics.
+res.z$qc.rna
+
+# Checking out the reduced dimensions.
+library(scater)
+plotReducedDim(res.z$sce, "TSNE", colour_by = "graph.cluster")
+
+# Checking out the marker rankings for each cluster.
+# We use previewMarkers() just for a prettier print.
+scrapper::previewMarkers(res.z$markers.rna[["1"]])
+```
+
+The function generates an Rmarkdown report containing (almost) all of the steps required to reproduce the analysis.
+Let's have a look at it:
+
+```{r}
+fname <- file.path(outdir.z, "report.Rmd")
+cat(head(readLines(fname), 50), sep="\n")
+```
+
+The function will also save the results to file inside a `results` subdirectory, which can be loaded back into the session using the `readResult()` function:
+
+```{r}
+reloaded <- augere.core::readResult(file.path(outdir.z, "results", "markers-rna", "2"))
+scrapper::previewMarkers(reloaded$x) # preview of the marker rankings
+str(reloaded$metadata) # along with some metadata
+```
+
+# Multi-batch analyses
+
+Larger datasets often have uninteresting variation associated with a blocking factor, e.g., batches.
+To illustrate, let's combine the Zeisel dataset with another brain dataset:
+
+```{r}
+sce.t <- TasicBrainData()
+common.brain <- intersect(rownames(sce.z), rownames(sce.t))
+combined.brain <- combineCols(
+    sce.z[common.brain,],
+    sce.t[common.brain,]
+)
+combined.brain$study <- rep(c("zeisel", "tasic"), c(ncol(sce.z), ncol(sce.t)))
+combined.brain
+```
+
+We now instruct `runSolo()` to block on the study of origin for each cell.
+In many steps (e.g., variance calculations, differential expression), this will force all calculations to be performed within each level of the blocking factor.
+This avoids interference from uninteresting differences between studies.
+
+```{r, fig.keep="none"}
+outdir.com <- tempfile()
+res.com <- runSolo(
+    combined.brain,
+    block = "study",
+    qc.mito.regex = "^mt-",
+    output.dir = outdir.com,
+    save.results = FALSE # skipping to save time for this vignette build.
+)
+```
+
+We will also apply mutual nearest neighbors (MNN) correction to remove differences between studies in the low-dimensional space;
+the MNN-corrected coordinates are then used for all downstream analyses.
+
+```{r}
+# Now we have an extra set of MNN-corrected coordinates. 
+reducedDimNames(res.com$sce)
+
+# Examining the distribution of clusters between studies.
+table(res.com$sce$graph.cluster, res.com$sce$study)
+
+# Visualizing the distribution in the UMAP space.
+plotReducedDim(res.com$sce, "UMAP", colour_by = "study")
+```
+
+# With proteomics
+
+`runSolo()` can also handle proteomics data from CITE-seq experiments.
+We'll demonstrate on yet another example dataset, where the ADT counts are held in an alternative experiment:
+
+```{r}
+sce.k <- KotliarovPBMCData()
+sce.k <- sce.k[,1:5000] # to cut build time for this vignette! 
+sce.k
+```
+
+We specify the experiment containing the ADT counts in `runSolo()`.
+
+```{r, fig.keep="none"}
+outdir.k <- tempfile()
+res.k <- runSolo(
+    sce.k,
+    qc.mito.regex = "^MT-",
+    adt.experiment = "ADT",
+    output.dir = outdir.k,
+    save.results = FALSE # skipping to save time for this vignette build.
+)
+```
+
+This applies quality control, normalization and dimensionality reduction on the ADT data,
+and then combines the principal components with those from RNA into a single embedding for downstream analyses like clustering and visualization.
+The goal is to incorporate information from both modalities in the distance calculations,
+such that significant differences in either modality is capable of creating a new cluster.
+
+```{r}
+# Now we have an extra set of combined coordinates. 
+reducedDimNames(res.k$sce)
+
+# Checking out the ADT-specific QC metrics.
+res.k$qc.adt
+
+# Checking out the reduced dimensions.
+plotReducedDim(res.k$sce, "TSNE", colour_by = "graph.cluster")
+
+# We can also look at the ADT-specific markers for a cluster.
+scrapper::previewMarkers(res.k$markers.adt[[1]])
+```
+
+We could also analyze the ADT modality by itself by setting `rna.experiment=NULL`.
+
+# Cell type annotation
+
+`r self` implements a wrapper around `r BiocStyle::Biocpkg("SingleR")` for cell type annotation.
+We can either use one of the pre-defined references from the `r BiocStyle::Biocpkg("celldex")` package:
+
+```{r, fig.keep="none"}
+outdir.celldex <- tempfile()
+pred.celldex <- runAnnotate(
+    sce.z,
+    configureReferenceAnnotation("MouseRNAseqData", "label.main"),
+    output.dir = outdir.celldex
+)
+table(pred.celldex$predictions[[1]]$labels)
+```
+
+Or we can use another single-cell dataset.
+Here, we set `ref.aggregate=TRUE` to speed up the classification by aggregating single-cells in the reference into a smaller number of representative clusters.
+
+```{r, fig.keep="none"}
+outdir.tasic <- tempfile()
+pred.tasic <- runAnnotate(
+    sce.z,
+    configureReferenceAnnotation(sce.t, "primary_type", ref.assay="counts", ref.aggregate=TRUE),
+    output.dir = outdir.tasic
+)
+table(pred.tasic$predictions[[1]]$labels)
+```
+
+We can even pass multiple references, in which case `runAnnotate()` will annotate against each reference separately and then choose between the best labels over all references.
+
+```{r, fig.keep="none"}
+outdir.multi <- tempfile()
+pred.multi <- runAnnotate(
+    sce.z,
+    list(
+        rnaseq=configureReferenceAnnotation("MouseRNAseqData", "label.main"),
+        immgen=configureReferenceAnnotation("ImmGenData", "label.main")
+    ),
+    output.dir = outdir.multi
+)
+
+# Results for annotation against the individual references:
+names(pred.multi$predictions)
+
+# As well as the combined results:
+table(pred.multi$combined$labels, pred.multi$combined$reference)
+```
+
+# Session information {-}
+
+```{r}
+sessionInfo()
+```
