@@ -11,7 +11,7 @@ SummarizedExperiment::rowRanges(se) <- GenomicRanges::GRanges(c("chrA", "chrM")[
 rownames(se) <- sprintf("GENE-%s", seq_len(ngenes))
 
 tmp <- tempfile()
-ref <- runSolo(se, output.dir=tmp, save.results=FALSE)
+ref <- runSolo(se, output.dir=tmp)
 
 test_that("runSolo works correctly by default", {
     expect_s4_class(ref$sce, "SingleCellExperiment")
@@ -38,6 +38,14 @@ test_that("runSolo works correctly by default", {
     expect_identical(names(ref$markers.rna), levels(ref$sce$graph.cluster))
     expect_s4_class(ref$markers.rna[[1]], "DFrame")
     expect_identical(sort(rownames(ref$markers.rna[[1]])), sort(rownames(se)))
+
+    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "sce"))$x, "SingleCellExperiment")
+    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "qc-rna"))$x, "DFrame")
+    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "markers-rna", "1"))$x, "DFrame")
+
+    lines <- readLines(file.path(tmp, "report.Rmd"))
+    expect_false(any(grepl("block", lines))) # there shouldn't be any references to blocking here.
+    expect_false(any(grepl("ADT", lines, ignore.case=TRUE))) # there shouldn't be any references to ADTs here.
 })
 
 test_that("runSolo works with a subset", {
@@ -156,15 +164,6 @@ test_that("runSolo works with symbols", {
     output <- runSolo(copy, symbol.field="symbol", save.results=FALSE, output.dir=tmp)
     expect_identical(SummarizedExperiment::rowData(output$sce)$symbol, SummarizedExperiment::rowData(copy)$symbol)
     expect_identical(output$markers[[1]]$symbol, sub("GENE-", "SYMBOL-", rownames(output$markers[[1]])))
-})
-
-test_that("runSolo can save results", {
-    tmp <- tempfile()
-    saved <- runSolo(se, output.dir=tmp)
-
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "sce"))$x, "SingleCellExperiment")
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "qc-rna"))$x, "DFrame")
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "markers-rna", "1"))$x, "DFrame")
 })
 
 test_that("runSolo respects custom metadata", {

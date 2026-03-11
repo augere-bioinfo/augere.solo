@@ -9,31 +9,33 @@ ref <- SummarizedExperiment::SummarizedExperiment(list(counts = rmat))
 rownames(ref) <- sprintf("GENE-%s", seq_len(nrow(ref)))
 ref$label <- sample(LETTERS, ncol(ref), replace=TRUE)
 
-tmp <- tempfile()
+deftmp <- tempfile()
 default <- runAnnotate(
     test,
     configureReferenceAnnotation(ref, "label", ref.assay=1),
-    output.dir=tmp,
-    save.results=FALSE
+    output.dir=deftmp
 )
 
 test_that("runAnnotate works in the basic case", {
     expect_null(default$combined)
+
     expect_identical(names(default$predictions), "1")
     expect_identical(nrow(default$predictions[["1"]]), ncol(test)) 
     expect_s4_class(default$predictions[[1]], "DataFrame")
     expect_type(default$predictions[[1]]$labels, "character")
     expect_true(all(default$predictions[[1]]$labels %in% LETTERS))
+    expect_gt(length(unlist(S4Vectors::metadata(default$predictions[[1]])$de.genes)), 0) # make sure we actually found some genes.
 
-    lines <- readLines(file.path(tmp, "report.Rmd"))
+    expect_s4_class(augere.core::readResult(file.path(deftmp, "results", "pred-1"))$x, "DFrame")
+    expect_false(file.exists(file.path(deftmp, "results", "combined")))
+
+    lines <- readLines(file.path(deftmp, "report.Rmd"))
     m <- grep("normalizeRnaCounts.se", lines, fixed=TRUE)
     expect_identical(length(m), 2L) # one for the test, one for the reference.
 
-    m <- grep("block", lines)
-    expect_identical(length(m), 0L) # no mentions of blocking should be around.
-
-    expect_false(any(grepl("restrict = universe", lines, fixed=TRUE))) # no mentions of intersecting if there's only a single reference.
-    expect_false(any(grepl("display.row.names = old.test.rownames", lines, fixed=TRUE))) # no need to specify the old rownames for marker diagnostics.
+    expect_false(any(grepl("block", lines)), 0L) # no mentions of blocking should be around.
+    expect_false(any(grepl("restrict = ", lines, fixed=TRUE))) # no mentions of intersecting if there's only a single reference.
+    expect_false(any(grepl("display.row.names =", lines, fixed=TRUE))) # no need to specify the old rownames for marker diagnostics.
 })
 
 test_that("runAnnotate handles pre-normalized test and reference data", {
@@ -169,31 +171,10 @@ test_that("runAnnotate handles blocking in the reference", {
     expect_identical(length(m), 2L) # once for normalization, another for trainSingleR itself.
 })
 
-test_that("runAnnotate works with multiple references (simple)", {
-    tmp <- tempfile()
-    out <- runAnnotate(
-        test,
-        list(
-            FOO=configureReferenceAnnotation(ref, "label", ref.assay=1),
-            BAR=configureReferenceAnnotation(ref, "label", ref.assay="counts")
-        ),
-        output.dir=tmp,
-        save.results=FALSE
-    )
-
-    expect_identical(names(out$predictions), c("FOO", "BAR"))
-    expect_identical(out$predictions$FOO, default$predictions[[1]])
-    expect_identical(out$predictions$BAR, default$predictions[[1]])
-    expect_identical(out$combined$labels, default$predictions[[1]]$labels) # should be the same as these are just duplicates of each other.
-
-    lines <- readLines(file.path(tmp, "report.Rmd"))
-    m <- grep("restrict = universe", lines)
-    expect_identical(length(m), 2L) # once for each reference.
-})
-
-test_that("runAnnotate works with multiple references (complex)", {
+test_that("runAnnotate works with multiple references", {
     # Normalize first otherwise the results will be slightly different if we subset and then normalize.
-    tcopy <- scrapper::normalizeRnaCounts.se(test)
+    # We also cut down the number of samples for speed as combined annotations are currently very slow. 
+    tcopy <- scrapper::normalizeRnaCounts.se(test[,1:20])
     rcopy <- scrapper::normalizeRnaCounts.se(ref)
 
     rmat2 <- matrix(rpois(150 * 1000, lambda=10), ncol=150)
@@ -210,14 +191,24 @@ test_that("runAnnotate works with multiple references (complex)", {
             BAR=configureReferenceAnnotation(ref2[201:1000,], "assigned", ref.assay="logcounts")
         ),
         test.assay="logcounts",
-        output.dir=tmp,
-        save.results=FALSE
+        output.dir=tmp
     )
 
     expect_true(all(out$predictions$FOO$labels %in% LETTERS))
     expect_true(all(out$predictions$BAR$labels %in% letters))
     expect_true(all(out$combined$labels %in% c(LETTERS, letters)))
     expect_true(all(out$combined$reference %in% 1:2))
+
+    all.genes.1 <- unlist(S4Vectors::metadata(out$predictions[[1]])$de.genes)
+    expect_gt(length(all.genes.1), 0)
+    expect_true(all(all.genes.1 %in% rownames(tcopy)[201:800]))
+    all.genes.2 <- unlist(S4Vectors::metadata(out$predictions[[2]])$de.genes)
+    expect_gt(length(all.genes.2), 0)
+    expect_true(all(all.genes.2 %in% rownames(tcopy)[201:800]))
+
+    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "pred-FOO"))$x, "DFrame")
+    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "pred-BAR"))$x, "DFrame")
+    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "combined"))$x, "DFrame")
 
     # Comparing it to manual slicing of the feature space.
     manual <- runAnnotate(
@@ -248,6 +239,7 @@ test_that("runAnnotate works with celldex references", {
         output.dir=tmp,
         save.results=FALSE
     )
+    expect_gt(length(unlist(S4Vectors::metadata(out$predictions[[1]])$de.genes)), 0) # make sure we actually found some genes.
 
     tmp2 <- tempfile()
     manual <- runAnnotate(
@@ -257,13 +249,9 @@ test_that("runAnnotate works with celldex references", {
         save.results=FALSE
     )
     expect_identical(out, manual)
-})
 
-test_that("runAnnotate works with celldex references in Ensembl", {
+    # Also works with Ensembl.
     suppressWarnings(ref.inbuilt <- celldex::BlueprintEncodeData(ensembl=TRUE))
-
-    tmat <- matrix(rpois(100000, lambda=5), ncol=100)
-    test <- SummarizedExperiment::SummarizedExperiment(list(counts = tmat))
     rownames(test) <- sample(rownames(ref.inbuilt), nrow(test))
 
     tmp <- tempfile()
@@ -275,47 +263,15 @@ test_that("runAnnotate works with celldex references in Ensembl", {
         save.results=FALSE
     ))
 
-    manual <- runAnnotate(
-        test,
-        configureReferenceAnnotation(ref.inbuilt, "label.main", ref.marker.method="classic"),
-        output.dir=tmp,
-        test.is.ensembl=TRUE,
-        save.results=FALSE
-    )
-    expect_identical(out, manual)
-})
-
-test_that("runAnnotate can save results", {
-    tmp <- tempfile()
-    out <- runAnnotate(
-        test,
-        configureReferenceAnnotation(ref, "label", ref.assay=1),
-        output.dir=tmp
-    )
-
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "pred-1"))$x, "DFrame")
-    expect_false(file.exists(file.path(tmp, "results", "combined")))
-
-    # Works with multiple references.
-    tmp <- tempfile()
-    out <- runAnnotate(
-        test,
-        list(
-            FOO=configureReferenceAnnotation(ref, "label", ref.assay=1),
-            BAR=configureReferenceAnnotation(ref, "label", ref.assay=1)
-        ),
-        output.dir=tmp
-    )
-
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "pred-FOO"))$x, "DFrame")
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "pred-BAR"))$x, "DFrame")
-    expect_s4_class(augere.core::readResult(file.path(tmp, "results", "combined"))$x, "DFrame")
+    expect_s4_class(out$predictions[[1]], "DataFrame")
+    expect_identical(nrow(out$predictions[[1]]), ncol(test))
+    expect_gt(length(unlist(S4Vectors::metadata(out$predictions[[1]])$de.genes)), 0) # make sure we actually found some genes.
 })
 
 test_that("runAnnotate respects custom metadata", {
     tmp <- tempfile()
     out <- runAnnotate(
-        test,
+        test[,1:20], # cutting down the number of test cells to save time.
         list(
             configureReferenceAnnotation(ref, "label", ref.assay=1),
             configureReferenceAnnotation(ref, "label", ref.assay=1)

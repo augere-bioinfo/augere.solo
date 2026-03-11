@@ -81,7 +81,7 @@
 #' @examples
 #' library(scRNAseq)
 #' hESCs <- LaMannoBrainData('human-es')
-#' hESCs <- hESCs[,1:100] # speed up for demonstration.
+#' hESCs <- hESCs[,1:100] # subsetting to speed it up.
 #'
 #' tmp <- tempfile()
 #' results <- runAnnotate(
@@ -90,8 +90,11 @@
 #'         "HumanPrimaryCellAtlasData",
 #'         "label.main"
 #'     ),
-#'     output.dir = tmp
+#'     output.dir = tmp,
+#'     num.threads = 2 # speed it up a little.
 #' )
+#'
+#' list.files(tmp, recursive=TRUE)
 #' results$predictions
 #'
 #' @export

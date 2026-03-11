@@ -46,7 +46,12 @@ Now we call `runSolo()` to perform a routine analysis of this dataset:
 ```{r, fig.keep="none"}
 library(augere.solo)
 outdir.z <- tempfile()
-res.z <- runSolo(sce.z, qc.mito.regex = "^mt-", output.dir = outdir.z)
+res.z <- runSolo(
+    sce.z,
+    qc.mito.regex = "^mt-",
+    num.threads = 2, # speed it up a little
+    output.dir = outdir.z
+)
 ```
 
 This returns a list of various results, including QC metrics, marker rankings and a `SingleCellExperiment` decorated with clusterings and reduced dimensions: 
@@ -107,7 +112,8 @@ res.com <- runSolo(
     block = "study",
     qc.mito.regex = "^mt-",
     output.dir = outdir.com,
-    save.results = FALSE # skipping to save time for this vignette build.
+    num.threads = 2, # speed it up a little
+    save.results = FALSE # skipping to save more time 
 )
 ```
 
@@ -145,7 +151,8 @@ res.k <- runSolo(
     qc.mito.regex = "^MT-",
     adt.experiment = "ADT",
     output.dir = outdir.k,
-    save.results = FALSE # skipping to save time for this vignette build.
+    num.threads = 2, # speed it up a little
+    save.results = FALSE # skipping to save more time
 )
 ```
 
@@ -178,9 +185,11 @@ We can either use one of the pre-defined references from the `r BiocStyle::Biocp
 ```{r, fig.keep="none"}
 outdir.celldex <- tempfile()
 pred.celldex <- runAnnotate(
-    sce.z,
+    sce.z, 
     configureReferenceAnnotation("MouseRNAseqData", "label.main"),
-    output.dir = outdir.celldex
+    output.dir = outdir.celldex,
+    num.threads = 2, # speed it up a little
+    save.results = FALSE # skipping to save more time
 )
 table(pred.celldex$predictions[[1]]$labels)
 ```
@@ -193,7 +202,9 @@ outdir.tasic <- tempfile()
 pred.tasic <- runAnnotate(
     sce.z,
     configureReferenceAnnotation(sce.t, "primary_type", ref.assay="counts", ref.aggregate=TRUE),
-    output.dir = outdir.tasic
+    output.dir = outdir.tasic,
+    num.threads = 2, # speed it up a little
+    save.results = FALSE # skipping to save more time
 )
 table(pred.tasic$predictions[[1]]$labels)
 ```
@@ -203,12 +214,14 @@ We can even pass multiple references, in which case `runAnnotate()` will annotat
 ```{r, fig.keep="none"}
 outdir.multi <- tempfile()
 pred.multi <- runAnnotate(
-    sce.z,
+    sce.z[,1:1000], # subsetting to save some time.
     list(
         rnaseq=configureReferenceAnnotation("MouseRNAseqData", "label.main"),
         immgen=configureReferenceAnnotation("ImmGenData", "label.main")
     ),
-    output.dir = outdir.multi
+    output.dir = outdir.multi,
+    num.threads = 2, # speed it up a little
+    save.results = FALSE # skipping to save more time
 )
 
 # Results for annotation against the individual references:

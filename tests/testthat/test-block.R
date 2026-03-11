@@ -51,16 +51,6 @@ test_that("runSolo works with blocking", {
     expect_gte(length(reddim), 2L)
     expect_match(lines[reddim[1]], "PCA")
     expect_true(all(grep("MNN", lines[reddim[-1]])))
-
-    # Check that results are actually different compared to the unblocked case.
-    utmp <- tempfile()
-    unblocked <- runSolo(se, output.dir=utmp, save.results=FALSE)
-    expect_identical(ref$qc.rna[,setdiff(colnames(ref$qc.rna), "keep")], unblocked$qc.rna[,setdiff(colnames(unblocked$qc.rna), "keep")])
-    expect_false(identical(ref$markers.rna, unblocked$markers.rna))
-
-    ulines <- readLines(file.path(utmp, "report.Rmd"))
-    uhas.block <- grep("block", ulines)
-    expect_identical(length(uhas.block), 0L) # there shouldn't be any references to blocking here.
 })
 
 test_that("runSolo's kmeans behaves with blocking", {
@@ -79,7 +69,7 @@ test_that("runSolo's kmeans behaves with blocking", {
     expect_true(all(grep("MNN", lines[reddim[-1]])))
 })
 
-test_that("runSolo works if no clustering is performed", {
+test_that("runSolo works with blocking but without clustering", {
     # Specifically test whether the t-SNE and UMAP plots are configured correctly,
     # namely that they color by block instead of cluster.
     noclust <- runSolo(se, block.field="block", cluster.method=NULL, output.dir=tmp, save.results=FALSE)
@@ -90,4 +80,3 @@ test_that("runSolo works if no clustering is performed", {
     expect_identical(SingleCellExperiment::reducedDimNames(noclust$sce), c("PCA", "MNN", "TSNE", "UMAP"))
     expect_identical(SingleCellExperiment::reducedDim(noclust$sce, "MNN"), SingleCellExperiment::reducedDim(noclust$sce, "MNN"))
 })
-

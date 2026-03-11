@@ -24,6 +24,7 @@ Suggests:
     GenomicRanges,
     SummarizedExperiment,
     SingleCellExperiment,
+    scRNAseq,
     SingleR,
     celldex,
     jsonlite

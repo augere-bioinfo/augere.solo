@@ -205,15 +205,17 @@ Only the Rmarkdown report is saved to file.
 Simple analysis of scRNA-seq or CITE-seq data, from quality control to clustering and marker gene detection.
 }
 \examples{
-# Getting an example dataset from the scRNAseq package.
 library(scRNAseq)
 se <- ZeiselBrainData()
 
-# Running the pipeline; omitting the save for speed here.
 tmp <- tempfile()
-output <- runSolo(se, qc.mito.regex="^mt-", output.dir=tmp, save.results=FALSE)
+output <- runSolo(
+    se,
+    qc.mito.regex="^mt-",
+    output.dir=tmp,
+    num.threads = 2 # speed it up a little.
+)
 
-# Checking the outputs.
 list.files(tmp, recursive=TRUE)
 output$sce
 output$markers
