@@ -75,7 +75,7 @@ cat(head(readLines(fname), 50), sep="\n")
 The function will also save the results to file inside a `results` subdirectory, which can be loaded back into the session using the `readResult()` function:
 
 ```{r}
-reloaded <- augere.core::readResult(file.path(outdir.z, "results", "markers-rna", "2"))
+reloaded <- readResult(file.path(outdir.z, "results", "markers-rna", "2"))
 scrapper::previewMarkers(reloaded$x) # preview of the marker rankings
 str(reloaded$metadata) # along with some metadata
 ```
