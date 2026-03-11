@@ -198,11 +198,13 @@ We should also check that the upregulated markers are biologically relevant for 
 
 ```{r, results="asis"}
 for (lab in unique(pred$labels)) {
-    cat("\n\n##", lab, "{-}\n")
+    cat("\n\n###", lab, "{-}\n")
     SingleR::plotMarkerHeatmap(
         pred,
         test,
         label = lab,
+        average = TRUE,
+        center = TRUE,
         assay.type = <%= ASSAY_NORM_TEST %>,
 :BEGIN block
         block = SummarizedExperiment::colData(test)[,<%= BLOCK %>],
@@ -213,7 +215,7 @@ for (lab in unique(pred$labels)) {
 :BEGIN alt-row-names
         display.row.names = SummarizedExperiment::rowData(test)[,<%= DISPLAY_NAME_FIELD %>],
 :END
-        num.threads = <%= NUM_THREADS %> 
+        num.threads = <%= NUM_THREADS %>
     )
 }
 ```
@@ -274,10 +276,10 @@ pheatmap::pheatmap(log2(tab+1), colors=colorRampPalette(c('white', 'blue'))(101)
 :BEGIN visualization
 We plot the label assignments on pre-computed dimensionality reduction results.
 
-```{r}
-for (r in reducedDimNames(test)) {
+```{r, results="asis"}
+for (r in <%= REDUCED_DIMENSIONS %>) {
     cat("\n\n##", r, "{-}\n")
-    scater::plotReducedDim(test, r, colour_by = <%s= TARGET %>$labels)
+    print(scater::plotReducedDim(test, r, colour_by = I(<%= TARGET %>$labels)))
 }
 ```
 :END

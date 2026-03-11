@@ -125,6 +125,29 @@ test_that("runAnnotate works for symbol diagnostics", {
     expect_true(any(grep("display.row.names = SummarizedExperiment::rowData(test)[,\"FOO\"]", lines, fixed=TRUE)))
 })
 
+test_that("runAnnotate constructs extra visualizations", {
+    copy <- as(test, "SingleCellExperiment")
+    copy$cluster <- rep(letters[1:5], length.out=ncol(test))
+    SingleCellExperiment::reducedDim(copy, "TSNE") <- matrix(runif(ncol(test) * 2), ncol=2)
+
+    tmp <- tempfile()
+    out <- runAnnotate(
+        copy,
+        configureReferenceAnnotation(ref, "label", ref.assay=1),
+        output.dir=tmp,
+        cluster.field="cluster",
+        reduced.dimensions="TSNE",
+        save.results=FALSE
+    )
+
+    # Adding these extra fields has no effect on the results.
+    expect_identical(default$predictions[[1]], out$predictions[[1]])
+
+    lines <- readLines(file.path(tmp, "report.Rmd"))
+    m <- grep("plotReducedDim", lines)
+    expect_identical(length(m), 1L)
+})
+
 test_that("runAnnotate handles blocking in the reference", {
     copy <- ref
     copy$BAR <- rep(1:3, length.out=ncol(ref))

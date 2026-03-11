@@ -132,6 +132,11 @@ runAnnotate <- function(
     ### Set up test ###
     ###################
 
+    parsed[[1]] <- replacePlaceholders(
+        parsed[[1]],
+        list(AUTHOR = author.txt)
+    )
+
     parsed[["test-setup"]] <- processInputCommands(test, name="test")
 
     if (is.null(test.id.field)) {
@@ -400,7 +405,10 @@ runAnnotate <- function(
         } else {
             more.parsed[["visualization"]] <- replacePlaceholders(
                 more.parsed[["visualization"]],
-                list(TARGET = target)
+                list(
+                    TARGET = target,
+                    REDUCED_DIMENSIONS = deparseToString(reduced.dimensions)
+                )
             )
         }
 
@@ -433,7 +441,7 @@ runAnnotate <- function(
     }
 
     # Avoid spewing out cat() statements in the marker detection section.
-    parsed <- sub("^ *cat\\(", "list\\(", unlist(parsed))
+    parsed <- sub("^ *cat\\(", "list\\(", unlist(parsed, use.names=FALSE))
 
     env <- new.env()
     compileReport(fname, env=env, skip.chunks=skip.chunks, contents=parsed)
