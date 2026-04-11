@@ -12,7 +12,7 @@ rownames(se) <- sprintf("GENE-%s", seq_len(ngenes))
 
 tmp <- tempfile()
 pdf(file=NULL)
-ref <- runSolo(se, output.dir=tmp, suppress.plots=FALSE)
+ref <- runSolo(se, output.dir=tmp)
 dev.off()
 
 test_that("runSolo works correctly by default", {
@@ -164,7 +164,9 @@ test_that("runSolo works with symbols", {
 
     # Don't suppress plots here, we want to make sure symbols are correctly passed to the heatmap.
     tmp <- tempfile()
-    output <- runSolo(copy, symbol.field="symbol", output.dir=tmp, save.results=FALSE, suppress.plots=FALSE)
+    pdf(file=NULL)
+    output <- runSolo(copy, symbol.field="symbol", output.dir=tmp, save.results=FALSE) 
+    dev.off()
 
     expect_identical(SummarizedExperiment::rowData(output$sce)$symbol, SummarizedExperiment::rowData(copy)$symbol)
     expect_identical(output$markers[[1]]$symbol, sub("GENE-", "SYMBOL-", rownames(output$markers[[1]])))

@@ -103,7 +103,8 @@
 #' This is added to the various gene-based results, e.g., marker detection tables.
 #' If \code{NULL}, no symbols are added.
 #' @param save.results Boolean indicating whether the results should also be saved to file.
-#' @param suppress.plots Boolean indicating whether to suppress the plots.
+#' @param suppress.plots Boolean indicating whether to suppress the generation of plots.
+#' This can be set to \code{TRUE} for faster execution.
 #'
 #' @return 
 #' A Rmarkdown report named \code{report.Rmd} is written inside \code{output.dir} that contains the analysis commands.
@@ -184,7 +185,7 @@ runSolo <- function(
     author = NULL,
     dry.run = FALSE, 
     save.results = TRUE, 
-    suppress.plots = interactive(),
+    suppress.plots = FALSE, 
     num.threads =1
 ) {
     restore.fun <- resetInputCache()

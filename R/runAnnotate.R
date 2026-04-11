@@ -57,7 +57,8 @@
 #' If \code{NULL}, all cells in \code{test} are assumed to originate from the same block.
 #' @param ref.aggregate Boolean indicating that references should be aggregated inside \code{\link[SingleR]{trainSingleR}}.
 #' This can be set to \code{TRUE} for faster classification of large single-cell references.
-#' @param suppress.plots Boolean indicating whether to suppress the plots.
+#' @param suppress.plots Boolean indicating whether to suppress the generation of plots.
+#' This can be set to \code{TRUE} for faster execution.
 #'
 #' @return
 #' For \code{runAnnotate}, a Rmarkdown report named \code{report.Rmd} is written inside \code{output.dir} that contains the analysis commands.
@@ -116,7 +117,7 @@ runAnnotate <- function(
     author = NULL,
     dry.run = FALSE, 
     save.results = TRUE, 
-    suppress.plots = interactive(),
+    suppress.plots = FALSE, 
     num.threads = 1
 ) {
     restore.fun <- resetInputCache()

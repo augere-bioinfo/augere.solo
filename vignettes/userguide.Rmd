@@ -116,7 +116,7 @@ res.com <- runSolo(
     # Just setting these options to reduce the runtime,
     # otherwise this vignette takes too long to build.
     num.threads = 2,
-    suppress.plots = FALSE,
+    suppress.plots = TRUE,
     save.results = FALSE
 )
 ```

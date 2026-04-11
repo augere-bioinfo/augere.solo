@@ -14,8 +14,7 @@ pdf(file=NULL)
 default <- runAnnotate(
     test,
     configureReferenceAnnotation(ref, "label", ref.assay=1),
-    output.dir=deftmp,
-    suppress.plots=FALSE
+    output.dir=deftmp
 )
 dev.off()
 
@@ -72,15 +71,17 @@ test_that("runAnnotate works with alternative IDs", {
     SummarizedExperiment::rowData(rcopy)$BAR <- rownames(rcopy)
     rownames(rcopy) <- sprintf("WHEE-%s", seq_len(nrow(rcopy)))
 
+    # Don't suppress the plots to make sure the heatmaps have the correct IDs.
     tmp <- tempfile()
+    pdf(file=NULL)
     out <- runAnnotate(
         tcopy,
         configureReferenceAnnotation(rcopy, "label", ref.assay=1, ref.id.field="BAR"),
         test.id.field="FOO",
         output.dir=tmp,
-        suppress.plots=FALSE, # don't suppress to make sure the heatmaps have the correct IDs.
         save.results=FALSE
     )
+    dev.off()
 
     # Choice of IDs should still end up giving the same results.
     expect_identical(default$predictions[[1]], out$predictions[[1]])
@@ -95,15 +96,17 @@ test_that("runAnnotate handles blocking in the test", {
     copy <- test
     copy$BOO <- rep(1:3, length.out=ncol(test))
 
+    # Don't suppress to make sure block is correctly passed in plotMarkerHeatmap.
     tmp <- tempfile()
+    pdf(file=NULL)
     out <- runAnnotate(
         copy,
         configureReferenceAnnotation(ref, "label", ref.assay=1),
         test.block.field = "BOO",
         output.dir=tmp,
-        suppress.plots=FALSE, # don't suppress to make sure block is correctly passed in plotMarkerHeatmap.
         save.results=FALSE
     )
+    dev.off()
 
     # Blocking in the test has no effect on the results.
     expect_identical(default$predictions[[1]], out$predictions[[1]])
@@ -117,15 +120,17 @@ test_that("runAnnotate works for symbol diagnostics", {
     tcopy <- test
     SummarizedExperiment::rowData(tcopy)$FOO <- sprintf("ID-%s", seq_len(nrow(tcopy)))
 
+    # Don't suppress to make sure symbols are correctly used in plotMarkerHeatmap.
     tmp <- tempfile()
+    pdf(file=NULL)
     out <- runAnnotate(
         tcopy,
         configureReferenceAnnotation(ref, "label", ref.assay=1),
         test.symbol.field = "FOO",
         output.dir=tmp,
-        suppress.plots=FALSE, # don't suppress to make sure symbols are correctly used in plotMarkerHeatmap.
         save.results=FALSE
     )
+    dev.off()
 
     # Symbol only affects the marker heatmap diagnostics, so the results should be unchanged.
     expect_identical(out, default)
@@ -139,16 +144,18 @@ test_that("runAnnotate constructs extra visualizations", {
     copy$cluster <- rep(letters[1:5], length.out=ncol(test))
     SingleCellExperiment::reducedDim(copy, "TSNE") <- matrix(runif(ncol(test) * 2), ncol=2)
 
+    # Don't suppress to make plots are correctly made.
     tmp <- tempfile()
+    pdf(file=NULL)
     out <- runAnnotate(
         copy,
         configureReferenceAnnotation(ref, "label", ref.assay=1),
         output.dir=tmp,
         cluster.field="cluster",
         reduced.dimensions="TSNE",
-        suppress.plots=FALSE, # don't suppress to make plots are correctly made.
         save.results=FALSE
     )
+    dev.off()
 
     # Adding these extra fields has no effect on the results.
     expect_identical(default$predictions[[1]], out$predictions[[1]])

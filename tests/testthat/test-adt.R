@@ -18,7 +18,7 @@ rownames(ase)[1:5] <- sprintf("IgG-%s", 1:5)
 
 deftmp <- tempfile()
 pdf(file=NULL)
-default <- runSolo(ase, adt.experiment=TRUE, rna.experiment=NULL, output.dir=deftmp, suppress.plots=FALSE)
+default <- runSolo(ase, adt.experiment=TRUE, rna.experiment=NULL, output.dir=deftmp)
 dev.off()
 
 test_that("runSolo works with only ADTs", {
@@ -75,7 +75,9 @@ test_that("runSolo works with RNA plus ADTs", {
 
     # Don't suppress plots, make sure that the RNA plots are also produced.
     tmp <- tempfile()
-    combined <- runSolo(sce, adt.experiment="protein", cluster.method=c("graph", "kmeans"), output.dir=tmp, suppress.plots=FALSE)
+    pdf(file=NULL)
+    combined <- runSolo(sce, adt.experiment="protein", cluster.method=c("graph", "kmeans"), output.dir=tmp)
+    dev.off()
 
     expect_identical(
         ncol(SingleCellExperiment::reducedDim(combined$sce, "combined")),

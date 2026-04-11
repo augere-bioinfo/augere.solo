@@ -15,7 +15,7 @@ se$block <- sample(LETTERS[1:3], ncells, replace=TRUE)
 
 tmp <- tempfile()
 pdf(file=NULL)
-ref <- runSolo(se, block.field="block", output.dir=tmp, suppress.plots=FALSE, save.results=FALSE)
+ref <- runSolo(se, block.field="block", output.dir=tmp) 
 dev.off()
 
 test_that("runSolo works with blocking", {
@@ -74,7 +74,10 @@ test_that("runSolo's kmeans behaves with blocking", {
 test_that("runSolo works with blocking but without clustering", {
     # Specifically test whether the t-SNE and UMAP plots are configured correctly,
     # namely that they color by block instead of cluster.
-    noclust <- runSolo(se, block.field="block", cluster.method=NULL, output.dir=tmp, suppress.plots=FALSE, save.results=FALSE)
+    pdf(file=NULL)
+    noclust <- runSolo(se, block.field="block", cluster.method=NULL, output.dir=tmp, save.results=FALSE)
+    dev.off()
+
     expect_null(noclust$sce$graph.cluster)
     expect_null(noclust$sce$kmeans.cluster)
     expect_null(noclust$sce$markers.rna)
