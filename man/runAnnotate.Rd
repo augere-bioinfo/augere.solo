@@ -21,6 +21,7 @@ runAnnotate(
   author = NULL,
   dry.run = FALSE,
   save.results = TRUE,
+  suppress.plots = interactive(),
   num.threads = 1
 )
 
@@ -82,6 +83,8 @@ If provided, this is used to generate some diagnostics to compare the empirical 
 This will write the Rmarkdown report without evaluating it.}
 
 \item{save.results}{Boolean indicating whether the results should also be saved to file.}
+
+\item{suppress.plots}{Boolean indicating whether to suppress the plots.}
 
 \item{num.threads}{Integer specifying the number of threads to use in the various computations.}
 

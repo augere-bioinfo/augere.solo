@@ -14,7 +14,9 @@ rownames(se) <- sprintf("GENE-%s", seq_len(ngenes))
 se$block <- sample(LETTERS[1:3], ncells, replace=TRUE)
 
 tmp <- tempfile()
-ref <- runSolo(se, block.field="block", output.dir=tmp, save.results=FALSE)
+pdf(file=NULL)
+ref <- runSolo(se, block.field="block", output.dir=tmp, suppress.plots=FALSE, save.results=FALSE)
+dev.off()
 
 test_that("runSolo works with blocking", {
     expect_s4_class(ref$sce, "SingleCellExperiment")
@@ -55,7 +57,7 @@ test_that("runSolo works with blocking", {
 
 test_that("runSolo's kmeans behaves with blocking", {
     tmp <- tempfile()
-    kout <- runSolo(se, block.field="block", cluster.method="kmeans", output.dir=tmp, save.results=FALSE)
+    kout <- runSolo(se, block.field="block", cluster.method="kmeans", output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(kout$qc.rna, ref$qc.rna)
     expect_identical(SingleCellExperiment::reducedDimNames(kout$sce), c("PCA", "MNN", "TSNE", "UMAP"))
     expect_null(kout$sce$graph.cluster)
@@ -72,7 +74,7 @@ test_that("runSolo's kmeans behaves with blocking", {
 test_that("runSolo works with blocking but without clustering", {
     # Specifically test whether the t-SNE and UMAP plots are configured correctly,
     # namely that they color by block instead of cluster.
-    noclust <- runSolo(se, block.field="block", cluster.method=NULL, output.dir=tmp, save.results=FALSE)
+    noclust <- runSolo(se, block.field="block", cluster.method=NULL, output.dir=tmp, suppress.plots=FALSE, save.results=FALSE)
     expect_null(noclust$sce$graph.cluster)
     expect_null(noclust$sce$kmeans.cluster)
     expect_null(noclust$sce$markers.rna)

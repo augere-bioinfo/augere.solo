@@ -112,8 +112,12 @@ res.com <- runSolo(
     block = "study",
     qc.mito.regex = "^mt-",
     output.dir = outdir.com,
-    num.threads = 2, # speed it up a little
-    save.results = FALSE # skipping to save more time 
+
+    # Just setting these options to reduce the runtime,
+    # otherwise this vignette takes too long to build.
+    num.threads = 2,
+    suppress.plots = FALSE,
+    save.results = FALSE
 )
 ```
 
@@ -138,7 +142,7 @@ We'll demonstrate on yet another example dataset, where the ADT counts are held 
 
 ```{r}
 sce.k <- KotliarovPBMCData()
-sce.k <- sce.k[,1:5000] # to cut build time for this vignette! 
+sce.k <- sce.k[,1:1000] # save some time for the build system.
 sce.k
 ```
 
@@ -151,8 +155,12 @@ res.k <- runSolo(
     qc.mito.regex = "^MT-",
     adt.experiment = "ADT",
     output.dir = outdir.k,
-    num.threads = 2, # speed it up a little
-    save.results = FALSE # skipping to save more time
+
+    # Just setting these options to reduce the runtime,
+    # otherwise this vignette takes too long to build.
+    num.threads = 2,
+    suppress.plots = TRUE,
+    save.results = FALSE
 )
 ```
 
@@ -184,12 +192,17 @@ We can either use one of the pre-defined references from the `r BiocStyle::Biocp
 
 ```{r, fig.keep="none"}
 outdir.celldex <- tempfile()
+sub.z <- sce.z[,1:1000] # subsetting to save some time for the build system.
 pred.celldex <- runAnnotate(
-    sce.z, 
+    sub.z,
     configureReferenceAnnotation("MouseRNAseqData", "label.main"),
     output.dir = outdir.celldex,
-    num.threads = 2, # speed it up a little
-    save.results = FALSE # skipping to save more time
+
+    # Just setting these options to reduce the runtime,
+    # otherwise this vignette takes too long to build.
+    num.threads = 2,
+    suppress.plots = TRUE,
+    save.results = FALSE
 )
 table(pred.celldex$predictions[[1]]$labels)
 ```
@@ -200,11 +213,15 @@ Here, we set `ref.aggregate=TRUE` to speed up the classification by aggregating 
 ```{r, fig.keep="none"}
 outdir.tasic <- tempfile()
 pred.tasic <- runAnnotate(
-    sce.z,
+    sub.z,
     configureReferenceAnnotation(sce.t, "primary_type", ref.assay="counts", ref.aggregate=TRUE),
     output.dir = outdir.tasic,
-    num.threads = 2, # speed it up a little
-    save.results = FALSE # skipping to save more time
+
+    # Just setting these options to reduce the runtime,
+    # otherwise this vignette takes too long to build.
+    num.threads = 2,
+    suppress.plots = TRUE,
+    save.results = FALSE
 )
 table(pred.tasic$predictions[[1]]$labels)
 ```
@@ -214,14 +231,18 @@ We can even pass multiple references, in which case `runAnnotate()` will annotat
 ```{r, fig.keep="none"}
 outdir.multi <- tempfile()
 pred.multi <- runAnnotate(
-    sce.z[,1:1000], # subsetting to save some time.
+    sub.z,
     list(
         rnaseq=configureReferenceAnnotation("MouseRNAseqData", "label.main"),
         immgen=configureReferenceAnnotation("ImmGenData", "label.main")
     ),
     output.dir = outdir.multi,
-    num.threads = 2, # speed it up a little
-    save.results = FALSE # skipping to save more time
+
+    # Just setting these options to reduce the runtime,
+    # otherwise this vignette takes too long to build.
+    num.threads = 2,
+    suppress.plots = TRUE,
+    save.results = FALSE
 )
 
 # Results for annotation against the individual references:

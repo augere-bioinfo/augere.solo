@@ -10,11 +10,14 @@ rownames(ref) <- sprintf("GENE-%s", seq_len(nrow(ref)))
 ref$label <- sample(LETTERS, ncol(ref), replace=TRUE)
 
 deftmp <- tempfile()
+pdf(file=NULL)
 default <- runAnnotate(
     test,
     configureReferenceAnnotation(ref, "label", ref.assay=1),
-    output.dir=deftmp
+    output.dir=deftmp,
+    suppress.plots=FALSE
 )
+dev.off()
 
 test_that("runAnnotate works in the basic case", {
     expect_null(default$combined)
@@ -48,6 +51,7 @@ test_that("runAnnotate handles pre-normalized test and reference data", {
         configureReferenceAnnotation(rcopy, "label", ref.assay="logcounts"),
         test.assay="logcounts",
         output.dir=tmp,
+        suppress.plots=TRUE,
         save.results=FALSE
     )
 
@@ -74,6 +78,7 @@ test_that("runAnnotate works with alternative IDs", {
         configureReferenceAnnotation(rcopy, "label", ref.assay=1, ref.id.field="BAR"),
         test.id.field="FOO",
         output.dir=tmp,
+        suppress.plots=FALSE, # don't suppress to make sure the heatmaps have the correct IDs.
         save.results=FALSE
     )
 
@@ -96,6 +101,7 @@ test_that("runAnnotate handles blocking in the test", {
         configureReferenceAnnotation(ref, "label", ref.assay=1),
         test.block.field = "BOO",
         output.dir=tmp,
+        suppress.plots=FALSE, # don't suppress to make sure block is correctly passed in plotMarkerHeatmap.
         save.results=FALSE
     )
 
@@ -117,6 +123,7 @@ test_that("runAnnotate works for symbol diagnostics", {
         configureReferenceAnnotation(ref, "label", ref.assay=1),
         test.symbol.field = "FOO",
         output.dir=tmp,
+        suppress.plots=FALSE, # don't suppress to make sure symbols are correctly used in plotMarkerHeatmap.
         save.results=FALSE
     )
 
@@ -139,6 +146,7 @@ test_that("runAnnotate constructs extra visualizations", {
         output.dir=tmp,
         cluster.field="cluster",
         reduced.dimensions="TSNE",
+        suppress.plots=FALSE, # don't suppress to make plots are correctly made.
         save.results=FALSE
     )
 
@@ -159,6 +167,7 @@ test_that("runAnnotate handles blocking in the reference", {
         test,
         configureReferenceAnnotation(copy, "label", ref.assay=1, ref.block.field="BAR"), 
         output.dir=tmp,
+        suppress.plots=TRUE,
         save.results=FALSE
     )
 
@@ -191,7 +200,8 @@ test_that("runAnnotate works with multiple references", {
             BAR=configureReferenceAnnotation(ref2[201:1000,], "assigned", ref.assay="logcounts")
         ),
         test.assay="logcounts",
-        output.dir=tmp
+        output.dir=tmp,
+        suppress.plots=TRUE
     )
 
     expect_true(all(out$predictions$FOO$labels %in% LETTERS))
@@ -219,6 +229,7 @@ test_that("runAnnotate works with multiple references", {
         ),
         test.assay="logcounts",
         output.dir=tmp,
+        suppress.plots=TRUE,
         save.results=FALSE
     )
 
@@ -237,6 +248,7 @@ test_that("runAnnotate works with celldex references", {
         test,
         configureReferenceAnnotation("BlueprintEncodeData", "label.main"),
         output.dir=tmp,
+        suppress.plots=TRUE,
         save.results=FALSE
     )
     expect_gt(length(unlist(S4Vectors::metadata(out$predictions[[1]])$de.genes)), 0) # make sure we actually found some genes.
@@ -246,6 +258,7 @@ test_that("runAnnotate works with celldex references", {
         test,
         configureReferenceAnnotation(ref.inbuilt, "label.main", ref.marker.method="classic"),
         output.dir=tmp2,
+        suppress.plots=TRUE,
         save.results=FALSE
     )
     expect_identical(out, manual)
@@ -260,6 +273,7 @@ test_that("runAnnotate works with celldex references", {
         configureReferenceAnnotation("BlueprintEncodeData", "label.main"),
         output.dir=tmp,
         test.is.ensembl=TRUE,
+        suppress.plots=TRUE,
         save.results=FALSE
     ))
 
@@ -277,7 +291,8 @@ test_that("runAnnotate respects custom metadata", {
             configureReferenceAnnotation(ref, "label", ref.assay=1)
         ),
         metadata=list(custom=list(foo="bar")),
-        output.dir=tmp
+        output.dir=tmp,
+        suppress.plots=TRUE
     )
 
     meta <- jsonlite::fromJSON(file.path(tmp, "results", "pred-1", "_metadata.json"), simplifyVector=FALSE)

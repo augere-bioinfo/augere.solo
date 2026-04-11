@@ -39,6 +39,7 @@ runSolo(
   author = NULL,
   dry.run = FALSE,
   save.results = TRUE,
+  suppress.plots = interactive(),
   num.threads = 1
 )
 }
@@ -176,6 +177,8 @@ If \code{NULL}, no symbols are added.}
 This will write the Rmarkdown report without evaluating it.}
 
 \item{save.results}{Boolean indicating whether the results should also be saved to file.}
+
+\item{suppress.plots}{Boolean indicating whether to suppress the plots.}
 
 \item{num.threads}{Integer specifying the number of threads to use in the various computations.}
 }

@@ -11,7 +11,9 @@ SummarizedExperiment::rowRanges(se) <- GenomicRanges::GRanges(c("chrA", "chrM")[
 rownames(se) <- sprintf("GENE-%s", seq_len(ngenes))
 
 tmp <- tempfile()
-ref <- runSolo(se, output.dir=tmp)
+pdf(file=NULL)
+ref <- runSolo(se, output.dir=tmp, suppress.plots=FALSE)
+dev.off()
 
 test_that("runSolo works correctly by default", {
     expect_s4_class(ref$sce, "SingleCellExperiment")
@@ -55,14 +57,14 @@ test_that("runSolo works with a subset", {
     chosen <- LETTERS[1:20]
 
     tmp <- tempfile()
-    output <- runSolo(copy, subset.factor="blah", subset.levels=chosen, output.dir=tmp, reduced.dimensions=NULL, save.results=FALSE)
-    ref <- runSolo(copy[,copy$blah %in% chosen], output.dir=tmp, reduced.dimensions=NULL, save.results=FALSE)
+    output <- runSolo(copy, subset.factor="blah", subset.levels=chosen, output.dir=tmp, reduced.dimensions=NULL, suppress.plots=TRUE, save.results=FALSE)
+    ref <- runSolo(copy[,copy$blah %in% chosen], output.dir=tmp, reduced.dimensions=NULL, suppress.plots=TRUE, save.results=FALSE)
     expect_equal(output, ref)
 })
 
 test_that("runSolo works without QC filtering", {
     tmp <- tempfile()
-    output <- runSolo(se, qc.filter=FALSE, reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+    output <- runSolo(se, qc.filter=FALSE, reduced.dimensions=character(0), output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_s4_class(output$sce, "SingleCellExperiment")
     expect_identical(ncol(output$sce), ncells)
     expect_identical(output$sce$sum, output$qc.rna$sum)
@@ -74,7 +76,7 @@ test_that("runSolo works with a GRL for mitochondrial identification", {
     SummarizedExperiment::rowRanges(copy) <- as(SummarizedExperiment::rowRanges(se), "GRangesList")
 
     tmp <- tempfile()
-    output <- runSolo(copy, reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+    output <- runSolo(copy, reduced.dimensions=character(0), output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(ref$qc.rna$subset.proportion.mito, output$qc.rna$subset.proportion.mito)
 })
 
@@ -84,19 +86,19 @@ test_that("runSolo works with regex for mitochondrial genes", {
     rownames(copy) <- new.ids
 
     tmp <- tempfile()
-    output <- runSolo(copy, qc.mito.regex="^mt-", reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+    output <- runSolo(copy, qc.mito.regex="^mt-", reduced.dimensions=character(0), output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(ref$qc.rna$subset.proportion.mito, output$qc.rna$subset.proportion.mito)
 
     # Also works if you stick it in a symbol.
     copy <- se
     SummarizedExperiment::rowData(copy)$SYMBOL <- new.ids
-    output <- runSolo(copy, qc.mito.regex="^mt-", symbol.field="SYMBOL", reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+    output <- runSolo(copy, qc.mito.regex="^mt-", symbol.field="SYMBOL", reduced.dimensions=character(0), output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(ref$qc.rna$subset.proportion.mito, output$qc.rna$subset.proportion.mito)
 })
 
 test_that("runSolo works with k-means", {
     tmp <- tempfile()
-    kout <- runSolo(se, cluster.method="kmeans", output.dir=tmp, save.results=FALSE)
+    kout <- runSolo(se, cluster.method="kmeans", output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(names(kout$markers.rna), levels(kout$sce$kmeans.cluster))
     expect_false(identical(kout$sce$kmeans.cluster, ref$sce$graph.cluster))
 
@@ -106,13 +108,13 @@ test_that("runSolo works with k-means", {
     expect_identical(SingleCellExperiment::reducedDim(kout$sce, "TSNE"), SingleCellExperiment::reducedDim(ref$sce, "TSNE"))
 
     # We can actually use multiple methods.
-    mult <- runSolo(se, cluster.method=c("kmeans", "graph"), output.dir=tmp, save.results=FALSE)
+    mult <- runSolo(se, cluster.method=c("kmeans", "graph"), output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(mult$sce$kmeans.cluster, kout$sce$kmeans.cluster)
     expect_identical(mult$sce$graph.cluster, ref$sce$graph.cluster)
     expect_identical(mult$markers.rna, kout$markers.rna)
     expect_identical(SingleCellExperiment::reducedDim(mult$sce, "TSNE"), SingleCellExperiment::reducedDim(ref$sce, "TSNE"))
 
-    mult2 <- runSolo(se, cluster.method=c("graph", "kmeans"), output.dir=tmp, save.results=FALSE)
+    mult2 <- runSolo(se, cluster.method=c("graph", "kmeans"), output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(kout$sce$kmeans.cluster, mult2$sce$kmeans.cluster)
     expect_identical(ref$sce$graph.cluster, mult2$sce$graph.cluster)
     expect_identical(ref$markers.rna, mult2$markers.rna)
@@ -121,26 +123,26 @@ test_that("runSolo works with k-means", {
 
 test_that("runSolo works with various disabled NN options", {
     tmp <- tempfile()
-    graph.only <- runSolo(se, cluster.method="graph", reduced.dimensions=NULL, output.dir=tmp, save.results=FALSE)
+    graph.only <- runSolo(se, cluster.method="graph", reduced.dimensions=NULL, output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(SingleCellExperiment::reducedDimNames(graph.only$sce), "PCA")
     expect_true(is.factor(graph.only$sce$graph.cluster))
 
-    tsne.only <- runSolo(se, cluster.method="kmeans", reduced.dimensions="tsne", output.dir=tmp, save.results=FALSE)
+    tsne.only <- runSolo(se, cluster.method="kmeans", reduced.dimensions="tsne", output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(SingleCellExperiment::reducedDimNames(tsne.only$sce), c("PCA", "TSNE"))
     expect_null(tsne.only$sce$graph.cluster)
 
-    umap.only <- runSolo(se, cluster.method="kmeans", reduced.dimensions="umap", output.dir=tmp, save.results=FALSE)
+    umap.only <- runSolo(se, cluster.method="kmeans", reduced.dimensions="umap", output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(SingleCellExperiment::reducedDimNames(umap.only$sce), c("PCA", "UMAP"))
     expect_null(umap.only$sce$graph.cluster)
 
-    none <- runSolo(se, cluster.method="kmeans", reduced.dimensions=NULL, output.dir=tmp, save.results=FALSE)
+    none <- runSolo(se, cluster.method="kmeans", reduced.dimensions=NULL, output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(SingleCellExperiment::reducedDimNames(none$sce), "PCA")
     expect_null(none$sce$graph.cluster)
 })
 
 test_that("runSolo works with no clustering at all", {
     tmp <- tempfile()
-    noclust <- runSolo(se, cluster.method=NULL, reduced.dimensions=NULL, output.dir=tmp, save.results=FALSE)
+    noclust <- runSolo(se, cluster.method=NULL, reduced.dimensions=NULL, output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_null(noclust$sce$graph.cluster)
     expect_null(noclust$sce$kmeans.cluster)
     expect_identical(ncol(noclust$sce), ncol(ref$sce))
@@ -149,7 +151,7 @@ test_that("runSolo works with no clustering at all", {
 
 test_that("runSolo works with a log-fold change threshold", {
     tmp <- tempfile()
-    lfc <- runSolo(se, marker.lfc.threshold=1, reduced.dimensions=NULL, output.dir=tmp, save.results=FALSE)
+    lfc <- runSolo(se, marker.lfc.threshold=1, reduced.dimensions=NULL, output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(names(lfc$markers.rna), names(ref$markers.rna))
     delta <- lfc$markers.rna[[1]]$cohens.d.mean - ref$markers.rna[[1]]$cohens.d.mean
     expect_true(all(delta <= 0))
@@ -160,15 +162,17 @@ test_that("runSolo works with symbols", {
     copy <- se
     SummarizedExperiment::rowData(copy)$symbol <- sprintf("SYMBOL-%s", seq_len(nrow(copy)))
 
+    # Don't suppress plots here, we want to make sure symbols are correctly passed to the heatmap.
     tmp <- tempfile()
-    output <- runSolo(copy, symbol.field="symbol", save.results=FALSE, output.dir=tmp)
+    output <- runSolo(copy, symbol.field="symbol", output.dir=tmp, save.results=FALSE, suppress.plots=FALSE)
+
     expect_identical(SummarizedExperiment::rowData(output$sce)$symbol, SummarizedExperiment::rowData(copy)$symbol)
     expect_identical(output$markers[[1]]$symbol, sub("GENE-", "SYMBOL-", rownames(output$markers[[1]])))
 })
 
 test_that("runSolo respects custom metadata", {
     tmp <- tempfile()
-    custom <- runSolo(se, output.dir=tmp, metadata=list(custom=list(foo="bar")))
+    custom <- runSolo(se, output.dir=tmp, metadata=list(custom=list(foo="bar")), suppress.plots=TRUE)
 
     meta <- jsonlite::fromJSON(file.path(tmp, "results", "sce", "_metadata.json"), simplifyVector=FALSE)
     expect_identical(meta$custom$foo, "bar")

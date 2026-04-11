@@ -188,7 +188,7 @@ table(pred$labels)
 We visualize the (normalized) assignment scores for each test cell. 
 Ideally, the highest scoring label should be unambiguous for each cell.
 
-```{r}
+```{r plot-scores-<%= SHORT_NAME_RAW %>}
 SingleR::plotScoreHeatmap(pred, cells.order=pred$labels)
 ```
 
@@ -196,7 +196,7 @@ Another useful diagnostic is to examine the behavior of the top markers in the t
 The cells assigned to a label are expected to upregulate that label's markers.
 We should also check that the upregulated markers are biologically relevant for each label.
 
-```{r, results="asis"}
+```{r plot-markers-<%= SHORT_NAME_RAW  %>, results="asis"}
 for (lab in unique(pred$labels)) {
     cat("\n\n###", lab, "{-}\n")
     SingleR::plotMarkerHeatmap(
@@ -276,7 +276,7 @@ pheatmap::pheatmap(log2(tab+1), colors=colorRampPalette(c('white', 'blue'))(101)
 :BEGIN visualization
 We plot the label assignments on pre-computed dimensionality reduction results.
 
-```{r, results="asis"}
+```{r plot-reddim, results="asis"}
 for (r in <%= REDUCED_DIMENSIONS %>) {
     cat("\n\n##", r, "{-}\n")
     print(scater::plotReducedDim(test, r, colour_by = I(<%= TARGET %>$labels)))

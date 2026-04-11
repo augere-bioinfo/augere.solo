@@ -103,6 +103,7 @@
 #' This is added to the various gene-based results, e.g., marker detection tables.
 #' If \code{NULL}, no symbols are added.
 #' @param save.results Boolean indicating whether the results should also be saved to file.
+#' @param suppress.plots Boolean indicating whether to suppress the plots.
 #'
 #' @return 
 #' A Rmarkdown report named \code{report.Rmd} is written inside \code{output.dir} that contains the analysis commands.
@@ -183,6 +184,7 @@ runSolo <- function(
     author = NULL,
     dry.run = FALSE, 
     save.results = TRUE, 
+    suppress.plots = interactive(),
     num.threads =1
 ) {
     restore.fun <- resetInputCache()
@@ -941,8 +943,30 @@ runSolo <- function(
     # Avoid spewing out cat() statements in the marker detection section.
     parsed$markers <- sub("^ *cat\\(", "list\\(", unlist(parsed$markers))
 
+    # Skip all plotting chunks if they're just going to vanish into the aether.
+    if (suppress.plots) {
+        skip.chunks <- c(
+            skip.chunks,
+            "plot-rna-qc",
+            "plot-adt-qc",
+            "plot-rna-sf",
+            "plot-adt-sf",
+            "plot-hvg",
+            "plot-rna-pca",
+            "plot-adt-pca",
+            "plot-tsne",
+            "plot-tsne-cluster",
+            "plot-tsne-block",
+            "plot-umap",
+            "plot-umap-cluster",
+            "plot-umap-block",
+            "plot-rna-markers",
+            "plot-adt-markers"
+        )
+    }
+
     env <- new.env()
-    compileReport(fname, env=env, skip.chunks=skip.chunks, contents=parsed)
+    compileReport(fname, env=env, skip.chunks=skip.chunks, contents=parsed, suppress.plots=suppress.plots)
 
     output <- list(sce=env$sce)
     if (use.rna) {

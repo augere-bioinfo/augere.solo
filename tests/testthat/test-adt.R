@@ -17,7 +17,9 @@ rownames(ase) <- sprintf("TAG-%s", seq_len(ntags))
 rownames(ase)[1:5] <- sprintf("IgG-%s", 1:5)
 
 deftmp <- tempfile()
-default <- runSolo(ase, adt.experiment=TRUE, rna.experiment=NULL, output.dir=deftmp)
+pdf(file=NULL)
+default <- runSolo(ase, adt.experiment=TRUE, rna.experiment=NULL, output.dir=deftmp, suppress.plots=FALSE)
+dev.off()
 
 test_that("runSolo works with only ADTs", {
     expect_s4_class(default$sce, "SingleCellExperiment")
@@ -48,7 +50,7 @@ test_that("runSolo works with ADTs only in an altexp", {
     SingleCellExperiment::altExp(sce, "protein") <- ase
 
     tmp <- tempfile()
-    default2 <- runSolo(sce, adt.experiment="protein", rna.experiment=NULL, output.dir=deftmp, save.results=FALSE)
+    default2 <- runSolo(sce, adt.experiment="protein", rna.experiment=NULL, output.dir=deftmp, suppress.plots=TRUE, save.results=FALSE)
 
     expect_identical(default2$sce$graph.cluster, default$sce$graph.cluster)
     expect_identical(SingleCellExperiment::reducedDim(SingleCellExperiment::altExp(default2$sce), "PCA"), SingleCellExperiment::reducedDim(default$sce, "PCA"))
@@ -63,7 +65,7 @@ test_that("runSolo works with regex for IgG symbols", {
     rownames(copy) <- sprintf("whee-%s", seq_len(nrow(copy)))
 
     tmp <- tempfile()
-    symb <- runSolo(copy, symbol.field="SYMBOL", adt.experiment=TRUE, rna.experiment=NULL, reduced.dimensions=character(0), output.dir=tmp, save.results=FALSE)
+    symb <- runSolo(copy, symbol.field="SYMBOL", adt.experiment=TRUE, rna.experiment=NULL, reduced.dimensions=character(0), output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
     expect_identical(default$qc.adt, symb$qc.adt)
 })
 
@@ -71,8 +73,9 @@ test_that("runSolo works with RNA plus ADTs", {
     sce <- as(se, "SingleCellExperiment")
     SingleCellExperiment::altExp(sce, "protein") <- ase
 
+    # Don't suppress plots, make sure that the RNA plots are also produced.
     tmp <- tempfile()
-    combined <- runSolo(sce, adt.experiment="protein", cluster.method=c("graph", "kmeans"), output.dir=tmp)
+    combined <- runSolo(sce, adt.experiment="protein", cluster.method=c("graph", "kmeans"), output.dir=tmp, suppress.plots=FALSE)
 
     expect_identical(
         ncol(SingleCellExperiment::reducedDim(combined$sce, "combined")),
@@ -97,7 +100,7 @@ test_that("runSolo with ADTs and blocking", {
     ase$batch <- rep(1:4, length.out=ncol(ase))
 
     tmp <- tempfile()
-    blocked <- runSolo(ase, block="batch", adt.experiment=TRUE, rna.experiment=NULL, output.dir=tmp, save.results=FALSE)
+    blocked <- runSolo(ase, block="batch", adt.experiment=TRUE, rna.experiment=NULL, output.dir=tmp, suppress.plots=TRUE, save.results=FALSE)
 
     qc.thresh <- S4Vectors::metadata(blocked$sce)$qc$thresholds
     expect_identical(qc.thresh$block.ids, 1:4)

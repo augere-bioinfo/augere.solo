@@ -1,6 +1,6 @@
 Package: augere.solo
-Version: 0.99.1
-Date: 2026-04-06
+Version: 0.99.2
+Date: 2026-04-11
 Title: Automatic Generation of Single-Cell Analyses
 Description:
     Implements pipelines for generating single-cell analysis reports in the augere framework.

@@ -57,6 +57,7 @@
 #' If \code{NULL}, all cells in \code{test} are assumed to originate from the same block.
 #' @param ref.aggregate Boolean indicating that references should be aggregated inside \code{\link[SingleR]{trainSingleR}}.
 #' This can be set to \code{TRUE} for faster classification of large single-cell references.
+#' @param suppress.plots Boolean indicating whether to suppress the plots.
 #'
 #' @return
 #' For \code{runAnnotate}, a Rmarkdown report named \code{report.Rmd} is written inside \code{output.dir} that contains the analysis commands.
@@ -115,6 +116,7 @@ runAnnotate <- function(
     author = NULL,
     dry.run = FALSE, 
     save.results = TRUE, 
+    suppress.plots = interactive(),
     num.threads = 1
 ) {
     restore.fun <- resetInputCache()
@@ -185,6 +187,7 @@ runAnnotate <- function(
     all.ref.chunks <- list()
     all.anno.chunks <- list()
     all.save.chunks <- list()
+    all.fig.chunks <- character(0)
 
     for (r in seq_along(references)) {
         curref <- references[[r]]
@@ -321,6 +324,12 @@ runAnnotate <- function(
             )
         )
 
+        all.fig.chunks <- c(
+            all.fig.chunks,
+            paste0("plot-scores-", short.name),
+            paste0("plot-markers-", short.name)
+        )
+
         ##############
         ### Saving ###
         ##############
@@ -446,8 +455,17 @@ runAnnotate <- function(
     # Avoid spewing out cat() statements in the marker detection section.
     parsed <- sub("^ *cat\\(", "list\\(", unlist(parsed, use.names=FALSE))
 
+    # No point even running the plots if we're going to skip them.
+    if (suppress.plots) {
+        skip.chunks <- c(
+            skip.chunks,
+            all.fig.chunks,
+            "plot-reddim"
+        )
+    }
+
     env <- new.env()
-    compileReport(fname, env=env, skip.chunks=skip.chunks, contents=parsed)
+    compileReport(fname, env=env, skip.chunks=skip.chunks, contents=parsed, suppress.plots=suppress.plots)
 
     output <- list(predictions = env$predictions)
     if (!is.null(env$combined)) {

@@ -148,7 +148,7 @@ summary(rna.qc.df$keep)
 
 We might as well make some plots at this point.
 
-```{r}
+```{r plot-rna-qc}
 :BEGIN plot-simple
 scater::plotColData(<%= RNA_SE %>, y = "sum", colour_by = "keep") +
     ggplot2::scale_y_continuous(transform = "log1p") + 
@@ -230,7 +230,7 @@ summary(adt.qc.df$keep)
 
 We might as well make some plots at this point.
 
-```{r}
+```{r plot-adt-qc}
 :BEGIN plot-simple
 scater::plotColData(<%= ADT_SE %>, y = "sum", colour_by = "keep") +
     ggplot2::scale_y_continuous(transform = "log1p")
@@ -312,7 +312,7 @@ summary(BiocGenerics::sizeFactors(<%= RNA_SE %>))
 
 We visualize the distribution of the size factors, most of which should be around 1.
 
-```{r}
+```{r plot-rna-sf}
 scater::plotColData(<%= RNA_SE %>, x = <%= PLOT_X %>, y = "sizeFactor") +
     ggplot2::scale_y_log10()
 ```
@@ -345,7 +345,7 @@ summary(BiocGenerics::sizeFactors(<%= ADT_SE %>))
 
 We visualize the distribution of the size factors, most of which should be around 1.
 
-```{r}
+```{r plot-adt-sf}
 scater::plotColData(<%= ADT_SE %>, x = <%= PLOT_X %>, y = "sizeFactor") +
     ggplot2::scale_y_log10()
 ```
@@ -386,7 +386,7 @@ When multiple blocks are present, we fit a trend separately to the means/varianc
 This accounts for a block-specific relationship and avoids absorbing uninteresting differences between blocks into the variance estimates.
 :END
 
-```{r}
+```{r plot-hvg}
 :BEGIN unblocked
 fun <- approxfun(x = rna.hvg.df$means, y = rna.hvg.df$fitted, ties=mean)
 scater::plotRowData(<%= RNA_SE %>, x = "means", y = "variances", colour_by="hvg") +
@@ -444,7 +444,7 @@ dim(SingleCellExperiment::reducedDim(<%= RNA_SE %>, "PCA"))
 
 Let's have a look at the percentage of variance explained for each successive PC:
 
-```{r}
+```{r plot-rna-pca}
 rna.pca.info <- S4Vectors::metadata(<%= RNA_SE %>)$PCA
 rna.prop.exp <- rna.pca.info$variance.explained / rna.pca.info$total.variance * 100
 plot(cumsum(rna.prop.exp), ylab="Variance explained (%)", xlab="PC number", type="b")
@@ -474,7 +474,7 @@ dim(SingleCellExperiment::reducedDim(<%= ADT_SE %>, "PCA"))
 
 Let's have a look at the percentage of variance explained for each successive PC:
 
-```{r}
+```{r plot-adt-pca}
 adt.pca.info <- S4Vectors::metadata(<%= ADT_SE %>)$PCA
 adt.prop.exp <- adt.pca.info$variance.explained / adt.pca.info$total.variance * 100
 plot(cumsum(adt.prop.exp), ylab="Variance explained (%)", xlab="PC number", type="b")
@@ -621,7 +621,7 @@ Alright, let's get onto the _real_ business of single-cell data analysis -
 namely, to make some pretty plots to visualize our dataset.
 
 :BEGIN tsne-simple
-```{r, fig.asp=1, fig.wide=TRUE}
+```{r plot-tsne, fig.asp=1, fig.wide=TRUE}
 scater::plotReducedDim(sce, "TSNE"<%= COLOUR_BY_CHOICE %>)
 ```
 :END
@@ -631,19 +631,19 @@ scater::plotReducedDim(sce, "TSNE"<%= COLOUR_BY_CHOICE %>)
 
 ### By cluster {-}
 
-```{r, fig.asp=1, fig.wide=TRUE}
+```{r plot-tsne-cluster, fig.asp=1, fig.wide=TRUE}
 scater::plotReducedDim(sce, "TSNE", colour_by = <%= CHOSEN_CLUSTER %>)
 ```
 
 ### By block {-}
 
-```{r, fig.asp=1, fig.wide=TRUE}
+```{r plot-tsne-block, fig.asp=1, fig.wide=TRUE}
 scater::plotReducedDim(sce, "TSNE", colour_by = <%= BLOCK %>)
 ```
 :END
 
 :BEGIN umap-simple
-```{r, fig.asp=1, fig.wide=TRUE}
+```{r plot-umap, fig.asp=1, fig.wide=TRUE}
 scater::plotReducedDim(sce, "UMAP"<%= COLOUR_BY_CHOICE %>)
 ```
 :END
@@ -653,13 +653,13 @@ scater::plotReducedDim(sce, "UMAP"<%= COLOUR_BY_CHOICE %>)
 
 ### By cluster {-}
 
-```{r, fig.asp=1, fig.wide=TRUE}
+```{r plot-umap-cluster, fig.asp=1, fig.wide=TRUE}
 scater::plotReducedDim(sce, "UMAP", colour_by = <%= CHOSEN_CLUSTER %>)
 ```
 
 ### By block {-}
 
-```{r, fig.asp=1, fig.wide=TRUE}
+```{r plot-umap-block, fig.asp=1, fig.wide=TRUE}
 scater::plotReducedDim(sce, "UMAP", colour_by = <%= BLOCK %>)
 ```
 :END
@@ -716,7 +716,7 @@ scrapper::previewMarkers(<%= MARKER_PREFIX %>.markers[["1"]])
 
 We then display the relative log-expression for the top 20 markers of each cluster.
 
-```{r, results='asis'}
+```{r plot-<%= MARKER_PREFIX %>-markers, results='asis'}
 for (n in names(<%= MARKER_PREFIX %>.markers)) {
     cat("\n\n### ", n, " {-}\n")
     scater::plotGroupedHeatmap(
